@@ -1,16 +1,37 @@
 #pragma once
 #include <Arduino.h>
+#include <cmath>
 #include <functional>
+#include <utility>
 #include <vector>
 
-using StateCb = std::function<void(const String& entityId, const String& state)>;
+// Numeric attributes we track per entity. NAN means "not reported".
+struct HaLevels {
+  float brightness = NAN;   // light, 0-100 %
+  float kelvin = NAN;       // light color temperature
+  float position = NAN;     // cover, 0-100 %
+  float percentage = NAN;   // fan, 0-100 %
+  float volume = NAN;       // media_player, 0-100 %
+  float temperature = NAN;  // climate target temperature
+  float value = NAN;        // number / input_number state
+};
+
+using StateCb = std::function<void(const String& entityId, const String& state, const HaLevels& levels)>;
 using StatusCb = std::function<void(const String& status)>;
 
 void haBegin(StateCb onState, StatusCb onStatus);
 void haLoop();
 // (Re)subscribe to these entities. Safe to call before connected; applied on auth_ok.
 void haSetEntities(const std::vector<String>& ids);
-// action: toggle | on | off | scene | script | press
+// action: toggle | on | off | press | scene | script | open | close | stop | lock | unlock | play_pause
 void haCallAction(const String& entityId, const String& action);
+// Set a slider value. attr: brightness | color_temp | (empty: by domain). value is in the slider's own unit.
+void haCallSlider(const String& entityId, const String& attr, float value);
 bool haConnected();
 void haReconnect();  // after settings change
+
+// Entity picker data (id + friendly name), loaded from HA after connecting.
+const std::vector<std::pair<String, String>>& haEntities();
+bool haEntitiesLoading();
+void haRefreshEntities();
+String haEndpointName();  // "local" | "external" | ""

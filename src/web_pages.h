@@ -12,28 +12,40 @@ a{color:#7ab}
 #canvas{position:relative;width:720px;height:420px;background:#101214;border:1px solid #444;touch-action:none}
 .b{position:absolute;box-sizing:border-box;border-radius:12px;display:flex;align-items:center;justify-content:center;
  text-align:center;color:#fff;cursor:move;user-select:none;font-size:15px;overflow:hidden}
+.b.sl{background:#23272b!important;flex-direction:column;align-items:flex-start;justify-content:flex-start;padding:8px}
+.b.sl i{display:block;height:8px;border-radius:4px;margin-top:auto;margin-bottom:10px;width:100%;opacity:.8}
 .b.sel{outline:2px solid #fff}
 .h{position:absolute;right:0;bottom:0;width:18px;height:18px;background:#fff8;cursor:nwse-resize}
-#form{width:260px}
+#form{width:280px}
 label{display:block;margin:6px 0 2px;color:#9aa}
 input,select,button{width:100%;box-sizing:border-box;padding:6px;background:#23262a;color:#eee;border:1px solid #444;border-radius:6px}
 button{cursor:pointer;margin-top:6px}
 .tab{display:inline-block;width:auto;padding:6px 10px;margin-right:4px}
 .tab.on{background:#3d7bd9}
+small{color:#9aa}
 </style></head><body>
 <h3>Bedside layout editor &nbsp; <small><a href="/settings">Settings</a> &middot; <a href="/update">Update</a> &middot; <span id="ver"></span></small></h3>
 <div id="tabs"></div>
 <div id="wrap">
 <div id="canvas"></div>
 <div id="form">
- <button id="add">+ Add button</button>
+ <button id="add">+ Add button</button><button id="addsl">+ Add slider</button>
  <div id="props" style="display:none">
   <label>Label</label><input id="label">
-  <label>Icon</label><select id="icon"></select>
-  <label>Entity id (e.g. light.bedside)</label><input id="entity_id">
-  <label>Action</label><select id="action"><option>toggle</option><option>on</option><option>off</option><option>scene</option><option>script</option><option>press</option></select>
+  <label>Entity <small id="entnote"></small></label><input id="entity_id" list="ents" placeholder="light.bedside" autocomplete="off">
+  <datalist id="ents"></datalist>
+  <button id="reload">Reload entity list from Home Assistant</button>
+  <div id="btnprops">
+   <label>Action</label><select id="action"></select>
+   <label>Icon</label><select id="icon"></select>
+  </div>
+  <div id="slprops">
+   <label>Slider controls</label><select id="attr"><option value="">Default for this device</option><option value="brightness">Light brightness</option><option value="color_temp">Light color temperature</option></select>
+   <label>Min (blank = default)</label><input id="min" type="number">
+   <label>Max (blank = default)</label><input id="max" type="number">
+  </div>
   <label>Color</label><input id="color" type="color">
-  <button id="del">Delete button</button>
+  <button id="del">Delete</button>
  </div>
  <hr><button id="addpage">+ Add page</button><button id="renpage">Rename page</button><button id="delpage">Delete page</button>
  <button id="save" style="background:#2d7a3e">Save &amp; apply</button>
@@ -44,18 +56,29 @@ const $=id=>document.getElementById(id);
 fetch('/api/version').then(r=>r.text()).then(v=>$('ver').textContent='v'+v);
 const S=1.5,W=480,H=280;
 const ICONS=['','power','eye','home','play','pause','bell','settings','ok','wifi','audio','charge','image'];
+const ACTIONS=[['toggle','Toggle'],['on','Turn on'],['off','Turn off'],['scene','Activate scene'],['script','Run script'],['press','Press button'],['open','Cover: open'],['close','Cover: close'],['stop','Cover: stop'],['lock','Lock'],['unlock','Unlock'],['play_pause','Media: play/pause']];
 let L={pages:[]},pi=0,sel=null;
 ICONS.forEach(i=>$('icon').add(new Option(i||'(none)',i)));
+ACTIONS.forEach(a=>$('action').add(new Option(a[1],a[0])));
 fetch('/api/layout').then(r=>r.json()).then(j=>{L=j;if(!L.pages.length)L.pages=[{name:'Page 1',buttons:[]}];draw()});
+function loadEnts(refresh){
+ fetch('/api/entities'+(refresh?'?refresh=1':'')).then(r=>r.json()).then(j=>{
+  $('ents').innerHTML='';j.entities.forEach(e=>{const o=document.createElement('option');o.value=e[0];o.label=e[1];$('ents').appendChild(o)});
+  $('entnote').textContent=j.connected?(j.entities.length+' devices'+(j.loading?' (loading...)':'')+' via '+j.endpoint):'(Home Assistant not connected; type the id)';
+  if(j.loading)setTimeout(()=>loadEnts(false),1500)});
+}
+loadEnts(false);
+$('reload').onclick=()=>loadEnts(true);
 function draw(){
  $('tabs').innerHTML='';
  L.pages.forEach((p,i)=>{const t=document.createElement('button');t.className='tab'+(i==pi?' on':'');t.textContent=p.name;t.onclick=()=>{pi=i;sel=null;draw()};$('tabs').appendChild(t)});
  const c=$('canvas');c.innerHTML='';
  const bs=L.pages[pi].buttons;
  bs.forEach((b,i)=>{
-  const d=document.createElement('div');d.className='b'+(sel===i?' sel':'');
+  const d=document.createElement('div');const sl=b.type=='slider';d.className='b'+(sl?' sl':'')+(sel===i?' sel':'');
   d.style.cssText+=`left:${b.x*S}px;top:${b.y*S}px;width:${b.w*S}px;height:${b.h*S}px;background:${b.color||'#4A90E2'}`;
-  d.textContent=b.label||b.entity_id||'';
+  const t=document.createElement('span');t.textContent=b.label||b.entity_id||'';d.appendChild(t);
+  if(sl){const bar=document.createElement('i');bar.style.background=b.color||'#4A90E2';d.appendChild(bar)}
   d.onpointerdown=e=>{sel=i;drag(e,b,'move');showProps();markSel()};
   const h=document.createElement('div');h.className='h';h.onpointerdown=e=>{e.stopPropagation();sel=i;drag(e,b,'size')};
   d.appendChild(h);c.appendChild(d)});
@@ -71,14 +94,21 @@ function drag(e,b,mode){
  const up=()=>{removeEventListener('pointermove',mv);removeEventListener('pointerup',up)};
  addEventListener('pointermove',mv);addEventListener('pointerup',up);
 }
+const FIELDS=['label','icon','entity_id','action','color','attr','min','max'];
 function showProps(){
  const b=sel!=null?L.pages[pi].buttons[sel]:null;$('props').style.display=b?'block':'none';if(!b)return;
- for(const k of['label','icon','entity_id','action','color'])$(k).value=b[k]||(k=='color'?'#4A90E2':'');
+ const sl=b.type=='slider';$('btnprops').style.display=sl?'none':'block';$('slprops').style.display=sl?'block':'none';
+ for(const k of FIELDS)$(k).value=b[k]!==undefined?b[k]:(k=='color'?'#4A90E2':'');
 }
-for(const k of['label','icon','entity_id','action','color'])$(k).oninput=()=>{
- const b=L.pages[pi].buttons[sel];b[k]=$(k).value;const d=$('canvas').children[sel];
- if(k=='label'||k=='entity_id')d.firstChild.textContent=b.label||b.entity_id;if(k=='color')d.style.background=b.color};
-$('add').onclick=()=>{const bs=L.pages[pi].buttons;bs.push({id:'b'+Date.now(),label:'New',icon:'power',x:10,y:10,w:140,h:80,entity_id:'',action:'toggle',color:'#4A90E2'});sel=bs.length-1;draw()};
+for(const k of FIELDS)$(k).oninput=()=>{
+ const b=L.pages[pi].buttons[sel];
+ if((k=='min'||k=='max')){if($(k).value==='')delete b[k];else b[k]=+$(k).value}else b[k]=$(k).value;
+ const d=$('canvas').children[sel];
+ if(k=='label'||k=='entity_id')d.firstChild.textContent=b.label||b.entity_id;
+ if(k=='color'){d.style.background=b.color;const i=d.querySelector('i');if(i)i.style.background=b.color}};
+$('add').onclick=()=>addW({type:'button',label:'New',icon:'power',x:10,y:10,w:140,h:80,action:'toggle'});
+$('addsl').onclick=()=>addW({type:'slider',label:'Brightness',x:10,y:10,w:200,h:70});
+function addW(o){const bs=L.pages[pi].buttons;bs.push(Object.assign({id:'b'+Date.now(),entity_id:'',color:'#4A90E2'},o));sel=bs.length-1;draw()}
 $('del').onclick=()=>{L.pages[pi].buttons.splice(sel,1);sel=null;draw()};
 $('addpage').onclick=()=>{L.pages.push({name:'Page '+(L.pages.length+1),buttons:[]});pi=L.pages.length-1;sel=null;draw()};
 $('renpage').onclick=()=>{const n=prompt('Page name',L.pages[pi].name);if(n){L.pages[pi].name=n;draw()}};
@@ -97,9 +127,14 @@ a{color:#7ab}</style></head><body>
 <form id="f">
 <label>Wi-Fi SSID</label><input name="wifi_ssid">
 <label>Wi-Fi password (leave blank to keep)</label><input name="wifi_pass" type="password">
-<label>Home Assistant host</label><input name="ha_host" placeholder="homeassistant.local">
+<h4>Home Assistant, local address (tried first)</h4>
+<label>Host</label><input name="ha_host" placeholder="homeassistant.local or 192.168.1.10">
 <label>Port</label><input name="ha_port" type="number" value="8123">
 <label><input type="checkbox" name="ha_tls" style="width:auto"> Use TLS (wss)</label>
+<h4>External address (fallback when local is unreachable, optional)</h4>
+<label>Host</label><input name="ha_ext_host" placeholder="myname.duckdns.org or xxxx.ui.nabu.casa">
+<label>Port</label><input name="ha_ext_port" type="number" value="443">
+<label><input type="checkbox" name="ha_ext_tls" style="width:auto" checked> Use TLS (wss)</label>
 <label>Long-lived access token (leave blank to keep)</label><input name="ha_token" type="password">
 <button type="submit" style="margin-top:14px;background:#2d7a3e">Save &amp; restart</button>
 </form><div id="msg"></div>

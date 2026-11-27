@@ -5,6 +5,7 @@
 #include <Update.h>
 #include <WebServer.h>
 #include "version.h"
+#include "ha_client.h"
 
 static WebServer server(80);
 static std::function<bool(const String&)> layoutCb;
@@ -44,6 +45,9 @@ void webBegin(std::function<bool(const String&)> onLayout) {
     d["ha_host"] = cfg.haHost;
     d["ha_port"] = cfg.haPort;
     d["ha_tls"] = cfg.haTls;
+    d["ha_ext_host"] = cfg.haExtHost;
+    d["ha_ext_port"] = cfg.haExtPort;
+    d["ha_ext_tls"] = cfg.haExtTls;
     d["version"] = FW_VERSION;
     String out;
     serializeJson(d, out);
@@ -62,6 +66,9 @@ void webBegin(std::function<bool(const String&)> onLayout) {
     cfg.haHost = d["ha_host"] | cfg.haHost;
     cfg.haPort = d["ha_port"] | cfg.haPort;
     cfg.haTls = d["ha_tls"] | cfg.haTls;
+    cfg.haExtHost = d["ha_ext_host"] | cfg.haExtHost;
+    cfg.haExtPort = d["ha_ext_port"] | cfg.haExtPort;
+    cfg.haExtTls = d["ha_ext_tls"] | cfg.haExtTls;
     String tok = d["ha_token"] | "";
     if (tok.length()) cfg.haToken = tok;
     if (!configSave()) {
@@ -71,6 +78,24 @@ void webBegin(std::function<bool(const String&)> onLayout) {
     server.send(200, "text/plain", "ok");
     delay(500);
     ESP.restart();
+  });
+  // Entity list for the editor's picker. ?refresh=1 reloads it from Home Assistant.
+  server.on("/api/entities", HTTP_GET, [] {
+    AUTH();
+    if (server.hasArg("refresh")) haRefreshEntities();
+    JsonDocument d;
+    d["connected"] = haConnected();
+    d["endpoint"] = haEndpointName();
+    d["loading"] = haEntitiesLoading();
+    JsonArray a = d["entities"].to<JsonArray>();
+    for (auto& e : haEntities()) {
+      JsonArray row = a.add<JsonArray>();
+      row.add(e.first);
+      row.add(e.second);
+    }
+    String out;
+    serializeJson(d, out);
+    server.send(200, "application/json", out);
   });
   server.on("/update", HTTP_GET, [] { AUTH(); server.send_P(200, "text/html", UPDATE_HTML); });
   server.on("/api/version", HTTP_GET, [] { AUTH(); server.send(200, "text/plain", FW_VERSION); });
