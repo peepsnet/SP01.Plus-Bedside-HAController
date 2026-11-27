@@ -17,8 +17,11 @@ def make_release_files(source, target, env):
     shutil.copyfile(app, ota)
 
     board = env.BoardConfig()
-    flash_mode = board.get("build.flash_mode", "dio")
-    flash_freq = str(int(board.get("build.f_flash", "80000000L").rstrip("L")) // 1000000) + "m"
+    # Use exactly what `pio run -t upload` passes to esptool write_flash. PlatformIO deliberately writes a DIO header
+    # for the first-stage image even on QIO boards; forcing "qio" here made the ROM switch to quad reads and fail
+    # right after the first segment ("ets_loader.c 78", boot loop).
+    flash_mode = env.subst("${__get_board_flash_mode(__env__)}")
+    flash_freq = env.subst("${__get_board_f_image(__env__)}")
     flash_size = board.get("upload.flash_size", "16MB")
     platform = env.PioPlatform()
     esptool = os.path.join(platform.get_package_dir("tool-esptoolpy"), "esptool.py")
