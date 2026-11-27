@@ -9,7 +9,8 @@ static const char EDITOR_HTML[] PROGMEM = R"HTML(<!doctype html>
 body{font:14px system-ui,sans-serif;background:#16181b;color:#e6e8ea;margin:0;padding:12px}
 a{color:#7ab}
 #wrap{display:flex;flex-wrap:wrap;gap:16px}
-#canvas{position:relative;width:720px;height:420px;background:#101214;border:1px solid #444;touch-action:none}
+#canvas{position:relative;width:720px;height:420px;background-color:#101214;border:1px solid #444;touch-action:none;
+ background-image:linear-gradient(#2a2e33 1px,transparent 1px),linear-gradient(90deg,#2a2e33 1px,transparent 1px);background-size:30px 30px}
 .b{position:absolute;box-sizing:border-box;border-radius:12px;display:flex;align-items:center;justify-content:center;
  text-align:center;color:#fff;cursor:move;user-select:none;font-size:15px;overflow:hidden}
 .b.sl{background:#23272b!important;flex-direction:column;align-items:flex-start;justify-content:flex-start;padding:8px}
@@ -35,6 +36,14 @@ small{color:#9aa}
   <label>Entity <small id="entnote"></small></label><input id="entity_id" list="ents" placeholder="light.bedside" autocomplete="off">
   <datalist id="ents"></datalist>
   <button id="reload">Reload entity list from Home Assistant</button>
+  <label>Size and position, in grid cells (1 cell = 20 px)</label>
+  <div id="cells" style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+   <span><small>Width</small><input id="cw" type="number" min="2" step="1"></span>
+   <span><small>Height</small><input id="ch" type="number" min="2" step="1"></span>
+   <span><small>Column</small><input id="cx" type="number" min="0" step="1"></span>
+   <span><small>Row</small><input id="cy" type="number" min="0" step="1"></span>
+  </div>
+  <div id="sizeinfo"><small></small></div>
   <div id="btnprops">
    <label>Action</label><select id="action"></select>
    <label>Icon</label><select id="icon"></select>
@@ -54,7 +63,8 @@ small{color:#9aa}
 <script>
 const $=id=>document.getElementById(id);
 fetch('/api/version').then(r=>r.text()).then(v=>$('ver').textContent='v'+v);
-const S=1.5,W=480,H=280;
+const S=1.5,W=480,H=280,G=20;  // G = grid cell in screen pixels (24 x 14 cells)
+const cells=v=>Math.round(v/G*10)/10;
 const ICONS=['','power','eye','home','play','pause','bell','settings','ok','wifi','audio','charge','image'];
 const ACTIONS=[['toggle','Toggle'],['on','Turn on'],['off','Turn off'],['scene','Activate scene'],['script','Run script'],['press','Press button'],['open','Cover: open'],['close','Cover: close'],['stop','Cover: stop'],['lock','Lock'],['unlock','Unlock'],['play_pause','Media: play/pause']];
 let L={pages:[]},pi=0,sel=null;
@@ -87,18 +97,33 @@ function draw(){
 function markSel(){[...$('canvas').children].forEach((d,i)=>d.classList.toggle('sel',i===sel))}
 function drag(e,b,mode){
  e.preventDefault();const sx=e.clientX,sy=e.clientY,ox=b.x,oy=b.y,ow=b.w,oh=b.h,el=e.currentTarget.classList.contains('h')?e.currentTarget.parentNode:e.currentTarget;
- const mv=ev=>{const dx=Math.round((ev.clientX-sx)/S/5)*5,dy=Math.round((ev.clientY-sy)/S/5)*5;
+ const mv=ev=>{const dx=Math.round((ev.clientX-sx)/S/G)*G,dy=Math.round((ev.clientY-sy)/S/G)*G;
   if(mode=='move'){b.x=Math.max(0,Math.min(W-b.w,ox+dx));b.y=Math.max(0,Math.min(H-b.h,oy+dy))}
-  else{b.w=Math.max(40,Math.min(W-b.x,ow+dx));b.h=Math.max(30,Math.min(H-b.y,oh+dy))}
-  el.style.left=b.x*S+'px';el.style.top=b.y*S+'px';el.style.width=b.w*S+'px';el.style.height=b.h*S+'px'};
+  else{b.w=Math.max(2*G,Math.min(W-b.x,ow+dx));b.h=Math.max(2*G,Math.min(H-b.y,oh+dy))}
+  el.style.left=b.x*S+'px';el.style.top=b.y*S+'px';el.style.width=b.w*S+'px';el.style.height=b.h*S+'px';cellInfo(b)};
  const up=()=>{removeEventListener('pointermove',mv);removeEventListener('pointerup',up)};
  addEventListener('pointermove',mv);addEventListener('pointerup',up);
 }
 const FIELDS=['label','icon','entity_id','action','color','attr','min','max'];
+function cellInfo(b){
+ $('cw').value=cells(b.w);$('ch').value=cells(b.h);$('cx').value=cells(b.x);$('cy').value=cells(b.y);
+ $('sizeinfo').firstChild.textContent=cells(b.w)+' x '+cells(b.h)+' cells  ('+b.w+' x '+b.h+' px)';
+}
+function applyCells(){
+ const b=L.pages[pi].buttons[sel];if(!b)return;
+ const v=id=>Math.round(+$(id).value*G);
+ b.w=Math.max(2*G,Math.min(W,v('cw')));b.h=Math.max(2*G,Math.min(H,v('ch')));
+ b.x=Math.max(0,Math.min(W-b.w,v('cx')));b.y=Math.max(0,Math.min(H-b.h,v('cy')));
+ const el=$('canvas').children[sel];
+ el.style.left=b.x*S+'px';el.style.top=b.y*S+'px';el.style.width=b.w*S+'px';el.style.height=b.h*S+'px';
+ $('sizeinfo').firstChild.textContent=cells(b.w)+' x '+cells(b.h)+' cells  ('+b.w+' x '+b.h+' px)';
+}
+for(const id of['cw','ch','cx','cy'])$(id).onchange=applyCells;
 function showProps(){
  const b=sel!=null?L.pages[pi].buttons[sel]:null;$('props').style.display=b?'block':'none';if(!b)return;
  const sl=b.type=='slider';$('btnprops').style.display=sl?'none':'block';$('slprops').style.display=sl?'block':'none';
  for(const k of FIELDS)$(k).value=b[k]!==undefined?b[k]:(k=='color'?'#4A90E2':'');
+ cellInfo(b);
 }
 for(const k of FIELDS)$(k).oninput=()=>{
  const b=L.pages[pi].buttons[sel];
@@ -106,8 +131,8 @@ for(const k of FIELDS)$(k).oninput=()=>{
  const d=$('canvas').children[sel];
  if(k=='label'||k=='entity_id')d.firstChild.textContent=b.label||b.entity_id;
  if(k=='color'){d.style.background=b.color;const i=d.querySelector('i');if(i)i.style.background=b.color}};
-$('add').onclick=()=>addW({type:'button',label:'New',icon:'power',x:10,y:10,w:140,h:80,action:'toggle'});
-$('addsl').onclick=()=>addW({type:'slider',label:'Brightness',x:10,y:10,w:200,h:70});
+$('add').onclick=()=>addW({type:'button',label:'New',icon:'power',x:20,y:20,w:140,h:80,action:'toggle'});
+$('addsl').onclick=()=>addW({type:'slider',label:'Brightness',x:20,y:20,w:200,h:80});
 function addW(o){const bs=L.pages[pi].buttons;bs.push(Object.assign({id:'b'+Date.now(),entity_id:'',color:'#4A90E2'},o));sel=bs.length-1;draw()}
 $('del').onclick=()=>{L.pages[pi].buttons.splice(sel,1);sel=null;draw()};
 $('addpage').onclick=()=>{L.pages.push({name:'Page '+(L.pages.length+1),buttons:[]});pi=L.pages.length-1;sel=null;draw()};
@@ -135,6 +160,9 @@ a{color:#7ab}</style></head><body>
 <label>Host</label><input name="ha_ext_host" placeholder="myname.duckdns.org or xxxx.ui.nabu.casa">
 <label>Port</label><input name="ha_ext_port" type="number" value="443">
 <label><input type="checkbox" name="ha_ext_tls" style="width:auto" checked> Use TLS (wss)</label>
+<h4>Screen brightness range (used by the swipe-down slider)</h4>
+<label>Minimum % (5 to 90)</label><input name="bright_min" type="number" min="5" max="90" value="10">
+<label>Maximum % (at least 10 above minimum, up to 100)</label><input name="bright_max" type="number" min="15" max="100" value="100">
 <label>Long-lived access token (leave blank to keep)</label><input name="ha_token" type="password">
 <button type="submit" style="margin-top:14px;background:#2d7a3e">Save &amp; restart</button>
 </form><div id="msg"></div>

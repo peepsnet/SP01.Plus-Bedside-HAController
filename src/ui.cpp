@@ -1,5 +1,6 @@
 #include "ui.h"
 #include "display.h"
+#include "config.h"
 #include <ArduinoJson.h>
 #include <lvgl.h>
 #include <map>
@@ -47,15 +48,133 @@ static void flushCb(lv_display_t* d, const lv_area_t* a, uint8_t* px) {
   lv_display_flush_ready(d);
 }
 
+// --- gestures ---------------------------------------------------------------------------------------------
+// Detected from raw touch points: swipe down from the top edge opens the brightness panel, swipe left/right
+// changes page. Gestures that start on a slider are ignored so dragging a slider never flips the page.
+static bool touching = false;
+static int32_t tx0, ty0, tx, ty;
+static bool sliderHeld = false;
+static uint32_t lastSwipeMs = 0;  // buttons ignore the click that a swipe would otherwise end with
+enum PendingSwipe { SW_NONE, SW_OPEN_BRIGHT, SW_CLOSE_BRIGHT, SW_NEXT, SW_PREV };
+static PendingSwipe pendingSwipe = SW_NONE;
+static bool brightOpen = false;
+static constexpr int TOP_ZONE = 44;      // swipe must start within this many pixels of the top edge
+static constexpr int SWIPE_MIN = 70;     // horizontal distance
+static constexpr int PULL_MIN = 50;      // vertical distance
+static inline bool recentlySwiped() { return millis() - lastSwipeMs < 500; }
+
+static void evalSwipe() {
+  if (sliderHeld || menuIsOpen()) return;
+  int dx = tx - tx0, dy = ty - ty0;
+  if (brightOpen) {
+    if (dy < -PULL_MIN && -dy > abs(dx)) pendingSwipe = SW_CLOSE_BRIGHT;
+  } else if (ty0 < TOP_ZONE && dy > PULL_MIN && dy > abs(dx)) {
+    pendingSwipe = SW_OPEN_BRIGHT;
+  } else if (abs(dx) > SWIPE_MIN && abs(dx) > abs(dy) * 2 && ty0 < UI_CANVAS_H) {
+    pendingSwipe = dx < 0 ? SW_NEXT : SW_PREV;
+  }
+  if (pendingSwipe != SW_NONE) lastSwipeMs = millis();
+}
+
 static void touchCb(lv_indev_t*, lv_indev_data_t* data) {
   int32_t x, y;
   if (tft.getTouch(&x, &y)) {
+    if (!touching) {
+      touching = true;
+      tx0 = x;
+      ty0 = y;
+    }
+    tx = x;
+    ty = y;
     data->state = LV_INDEV_STATE_PRESSED;
-    data->point.x = x;
-    data->point.y = y;
   } else {
+    if (touching) {
+      touching = false;
+      evalSwipe();  // runs before LVGL delivers the release/click events for this touch
+    }
     data->state = LV_INDEV_STATE_RELEASED;
   }
+  data->point.x = tx;
+  data->point.y = ty;
+}
+
+static lv_obj_t* brightScrim;
+static lv_obj_t* brightPanel;
+static lv_obj_t* brightSlider;
+static lv_obj_t* brightLabel;
+static lv_timer_t* brightTimer;
+
+void uiSetBrightnessPct(int pct, bool save) {
+  pct = constrain(pct, cfg.brightMinPct, cfg.brightMaxPct);
+  tft.setBrightness((uint8_t)(pct * 255 / 100));
+  cfg.brightnessPct = pct;
+  if (save) configSave();
+}
+
+static void showBrightness(bool open) {
+  brightOpen = open;
+  if (open) {
+    lv_slider_set_value(brightSlider, cfg.brightnessPct, LV_ANIM_OFF);
+    String t = String("Brightness  ") + cfg.brightnessPct + "%";
+    lv_label_set_text(brightLabel, t.c_str());
+    lv_obj_remove_flag(brightScrim, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_remove_flag(brightPanel, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(brightScrim);
+    lv_obj_move_foreground(brightPanel);
+    lv_timer_reset(brightTimer);
+    lv_timer_resume(brightTimer);
+  } else {
+    lv_obj_add_flag(brightScrim, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(brightPanel, LV_OBJ_FLAG_HIDDEN);
+    lv_timer_pause(brightTimer);
+  }
+}
+
+static void buildBrightnessPanel() {
+  lv_obj_t* scr = lv_screen_active();
+  // Tapping outside the panel closes it.
+  brightScrim = lv_obj_create(scr);
+  lv_obj_remove_style_all(brightScrim);
+  lv_obj_set_size(brightScrim, 480, 320);
+  lv_obj_add_flag(brightScrim, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_add_event_cb(brightScrim, [](lv_event_t*) { showBrightness(false); }, LV_EVENT_CLICKED, nullptr);
+  lv_obj_add_flag(brightScrim, LV_OBJ_FLAG_HIDDEN);
+
+  brightPanel = lv_obj_create(scr);
+  lv_obj_set_size(brightPanel, 480, 110);
+  lv_obj_set_pos(brightPanel, 0, 0);
+  lv_obj_set_style_bg_color(brightPanel, lv_color_hex(0x0B0E11), 0);
+  lv_obj_set_style_bg_opa(brightPanel, LV_OPA_COVER, 0);
+  lv_obj_set_style_border_width(brightPanel, 0, 0);
+  lv_obj_set_style_radius(brightPanel, 0, 0);
+  lv_obj_set_style_pad_all(brightPanel, 14, 0);
+  lv_obj_remove_flag(brightPanel, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_add_flag(brightPanel, LV_OBJ_FLAG_HIDDEN);
+
+  brightLabel = lv_label_create(brightPanel);
+  lv_obj_set_style_text_font(brightLabel, &lv_font_montserrat_24, 0);
+  lv_obj_set_style_text_color(brightLabel, lv_color_hex(0xFFFFFF), 0);
+  lv_obj_align(brightLabel, LV_ALIGN_TOP_LEFT, 0, 0);
+
+  brightSlider = lv_slider_create(brightPanel);
+  lv_obj_set_size(brightSlider, 420, 22);
+  lv_obj_align(brightSlider, LV_ALIGN_TOP_MID, 0, 52);
+  lv_slider_set_range(brightSlider, cfg.brightMinPct, cfg.brightMaxPct);
+  lv_obj_set_style_pad_all(brightSlider, 10, LV_PART_KNOB);
+  lv_obj_add_event_cb(brightSlider, [](lv_event_t*) { sliderHeld = true; }, LV_EVENT_PRESSED, nullptr);
+  lv_obj_add_event_cb(brightSlider, [](lv_event_t*) { sliderHeld = false; uiSetBrightnessPct(lv_slider_get_value(brightSlider), true); },
+                      LV_EVENT_RELEASED, nullptr);
+  lv_obj_add_event_cb(brightSlider, [](lv_event_t*) {
+    int v = lv_slider_get_value(brightSlider);
+    uiSetBrightnessPct(v, false);  // live preview; saved on release
+    String t = String("Brightness  ") + v + "%";
+    lv_label_set_text(brightLabel, t.c_str());
+    lv_timer_reset(brightTimer);
+  }, LV_EVENT_VALUE_CHANGED, nullptr);
+
+  // Close by itself after 6 s without interaction.
+  brightTimer = lv_timer_create([](lv_timer_t*) { if (!sliderHeld) showBrightness(false); }, 6000, nullptr);
+  lv_timer_pause(brightTimer);
 }
 
 void uiInit(ButtonHandler onPress, SliderHandler onSlide) {
@@ -63,7 +182,6 @@ void uiInit(ButtonHandler onPress, SliderHandler onSlide) {
   slideHandler = onSlide;
   tft.init();
   tft.setRotation(1);  // GUESS: landscape with USB port on the correct side; flip to 3 if upside down
-  tft.setBrightness(200);
   tft.fillScreen(TFT_BLACK);
 
   lv_init();
@@ -95,9 +213,14 @@ void uiInit(ButtonHandler onPress, SliderHandler onSlide) {
   lv_obj_set_style_pad_all(barHolder, 4, 0);
   lv_obj_set_style_pad_column(barHolder, 6, 0);
   statusLabel = nullptr;
+  buildBrightnessPanel();
+  uiSetBrightnessPct(cfg.brightnessPct, false);
 }
 
+static size_t curPage = 0;
+
 static void showPage(size_t idx) {
+  curPage = idx;
   for (size_t i = 0; i < pages.size(); i++) {
     if (i == idx) lv_obj_remove_flag(pages[i], LV_OBJ_FLAG_HIDDEN);
     else lv_obj_add_flag(pages[i], LV_OBJ_FLAG_HIDDEN);
@@ -189,6 +312,7 @@ static void buildButton(Widget& w, lv_obj_t* page, lv_color_t c, JsonObject b, i
   w.text = lb;
   if (w.entity.length()) {
     lv_obj_add_event_cb(btn, [](lv_event_t* e) {
+      if (recentlySwiped()) return;  // this click only ended a swipe
       auto* cx = (Widget*)lv_event_get_user_data(e);
       if (pressHandler) pressHandler(cx->entity, cx->action);
     }, LV_EVENT_CLICKED, &w);
@@ -234,6 +358,8 @@ static void buildSlider(Widget& w, lv_obj_t* page, lv_color_t c, JsonObject b, i
       float v = lv_slider_get_value(cx->obj) / cx->mul;
       if (slideHandler) slideHandler(cx->entity, cx->attr, v);
     };
+    lv_obj_add_event_cb(sl, [](lv_event_t*) { sliderHeld = true; }, LV_EVENT_PRESSED, nullptr);
+    lv_obj_add_event_cb(sl, [](lv_event_t* e) { sliderHeld = false; }, LV_EVENT_RELEASED, nullptr);
     lv_obj_add_event_cb(sl, send, LV_EVENT_RELEASED, &w);
     // While dragging: update the caption and send at most every 300 ms so lights follow the finger.
     lv_obj_add_event_cb(sl, [](lv_event_t* e) {
@@ -280,6 +406,7 @@ bool uiBuild(const String& layoutJson) {
       lv_label_set_text(l, p["name"] | "Page");
       lv_obj_center(l);
       lv_obj_add_event_cb(t, [](lv_event_t* e) {
+        if (recentlySwiped()) return;
         showPage((size_t)(uintptr_t)lv_event_get_user_data(e));
       }, LV_EVENT_CLICKED, (void*)(uintptr_t)pageIdx);
       tabs.push_back(t);
@@ -378,4 +505,12 @@ void uiSetStatus(const String& text) {
 
 std::vector<String> uiEntities() { return entityList; }
 
-void uiTick() { lv_timer_handler(); }
+void uiTick() {
+  PendingSwipe sw = pendingSwipe;
+  pendingSwipe = SW_NONE;
+  if (sw == SW_OPEN_BRIGHT) showBrightness(true);
+  else if (sw == SW_CLOSE_BRIGHT) showBrightness(false);
+  else if (sw == SW_NEXT && curPage + 1 < pages.size()) showPage(curPage + 1);
+  else if (sw == SW_PREV && curPage > 0) showPage(curPage - 1);
+  lv_timer_handler();
+}
