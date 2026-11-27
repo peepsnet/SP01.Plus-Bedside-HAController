@@ -21,7 +21,7 @@ button{cursor:pointer;margin-top:6px}
 .tab{display:inline-block;width:auto;padding:6px 10px;margin-right:4px}
 .tab.on{background:#3d7bd9}
 </style></head><body>
-<h3>Bedside layout editor &nbsp; <small><a href="/settings">Settings</a></small></h3>
+<h3>Bedside layout editor &nbsp; <small><a href="/settings">Settings</a> &middot; <a href="/update">Update</a> &middot; <span id="ver"></span></small></h3>
 <div id="tabs"></div>
 <div id="wrap">
 <div id="canvas"></div>
@@ -40,10 +40,11 @@ button{cursor:pointer;margin-top:6px}
  <div id="msg"></div>
 </div></div>
 <script>
+const $=id=>document.getElementById(id);
+fetch('/api/version').then(r=>r.text()).then(v=>$('ver').textContent='v'+v);
 const S=1.5,W=480,H=280;
 const ICONS=['','power','eye','home','play','pause','bell','settings','ok','wifi','audio','charge','image'];
 let L={pages:[]},pi=0,sel=null;
-const $=id=>document.getElementById(id);
 ICONS.forEach(i=>$('icon').add(new Option(i||'(none)',i)));
 fetch('/api/layout').then(r=>r.json()).then(j=>{L=j;if(!L.pages.length)L.pages=[{name:'Page 1',buttons:[]}];draw()});
 function draw(){
@@ -92,7 +93,7 @@ static const char SETTINGS_HTML[] PROGMEM = R"HTML(<!doctype html>
 <style>body{font:15px system-ui,sans-serif;background:#16181b;color:#e6e8ea;padding:14px;max-width:420px}
 label{display:block;margin:10px 0 3px;color:#9aa}input,button{width:100%;box-sizing:border-box;padding:8px;background:#23262a;color:#eee;border:1px solid #444;border-radius:6px}
 a{color:#7ab}</style></head><body>
-<h3>Settings &nbsp; <small><a href="/">Layout</a></small></h3>
+<h3>Settings &nbsp; <small><a href="/">Layout</a> &middot; <a href="/update">Update</a></small></h3>
 <form id="f">
 <label>Wi-Fi SSID</label><input name="wifi_ssid">
 <label>Wi-Fi password (leave blank to keep)</label><input name="wifi_pass" type="password">
@@ -108,4 +109,24 @@ fetch('/api/config').then(r=>r.json()).then(j=>{for(const k in j){const e=f.elem
 f.onsubmit=async e=>{e.preventDefault();const o={};for(const el of f.elements){if(!el.name)continue;o[el.name]=el.type=='checkbox'?el.checked:el.type=='number'?+el.value:el.value}
  const r=await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(o)});
  document.getElementById('msg').textContent=r.ok?'Saved. Device is restarting...':'Save failed'};
+</script></body></html>)HTML";
+
+static const char UPDATE_HTML[] PROGMEM = R"HTML(<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Bedside update</title>
+<style>body{font:15px system-ui,sans-serif;background:#16181b;color:#e6e8ea;padding:14px;max-width:420px}
+input,button{width:100%;box-sizing:border-box;padding:8px;margin-top:10px;background:#23262a;color:#eee;border:1px solid #444;border-radius:6px}a{color:#7ab}</style></head><body>
+<h3>Firmware update &nbsp; <small><a href="/">Layout</a></small></h3>
+<p>Running: <b id="ver">...</b></p>
+<p>Upload <code>firmware.bin</code> from a GitHub release (or <code>.pio/build/wt32-sc01-plus/firmware.bin</code>). The device reboots when done.</p>
+<input type="file" id="f" accept=".bin"><button id="go" style="background:#2d7a3e">Upload &amp; install</button>
+<progress id="p" value="0" max="100" style="width:100%;margin-top:10px"></progress><div id="msg"></div>
+<script>
+const $=id=>document.getElementById(id);
+fetch('/api/version').then(r=>r.text()).then(v=>$('ver').textContent='v'+v);
+$('go').onclick=()=>{const f=$('f').files[0];if(!f)return;const x=new XMLHttpRequest(),fd=new FormData();fd.append('firmware',f);
+ x.upload.onprogress=e=>$('p').value=e.loaded/e.total*100;
+ x.onload=()=>$('msg').textContent=x.status==200?'Installed. Rebooting...':'Failed: '+x.responseText;
+ x.onerror=()=>$('msg').textContent='Connection lost (may be rebooting).';
+ x.open('POST','/update');x.send(fd)};
 </script></body></html>)HTML";
