@@ -2,7 +2,7 @@ name: release
 
 # Manual: Actions tab -> release -> Run workflow -> pick patch / minor / major.
 # Bumps VERSION, builds, commits and tags it, publishes a GitHub release with the firmware files,
-# and updates the web flasher on GitHub Pages.
+# and then starts the "pages" workflow to update the web flasher.
 on:
   workflow_dispatch:
     inputs:
@@ -14,17 +14,13 @@ on:
 
 permissions:
   contents: write
-  pages: write
-  id-token: write
+  actions: write
 
 concurrency: release
 
 jobs:
   release:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
     steps:
       - name: Only release from main
         run: |
@@ -63,16 +59,9 @@ jobs:
           gh release create "v${{ steps.ver.outputs.version }}" dist/*.bin \
             --title "v${{ steps.ver.outputs.version }}" --generate-notes
 
-      - name: Assemble web flasher site
-        run: |
-          mkdir -p _site/firmware
-          cp site/index.html _site/
-          cp dist/*-full.bin _site/firmware/
-          python scripts/make_manifest.py "${{ steps.ver.outputs.version }}" \
-            "$(basename dist/*-full.bin)" _site/manifest.json
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: _site
-      - id: deploy
-        uses: actions/deploy-pages@v4
+      - name: Update web flasher
+        # Separate workflow, so a Pages problem can never fail the release itself.
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run pages.yml --ref main

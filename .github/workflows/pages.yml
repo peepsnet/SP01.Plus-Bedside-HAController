@@ -1,0 +1,45 @@
+name: pages
+
+# Deploys the web flasher (site/ + manifest + the latest release's full image) to GitHub Pages.
+# Needs Settings -> Pages -> Source: GitHub Actions. Started by the release workflow, on changes to site/,
+# or manually (Actions -> pages -> Run workflow), e.g. after enabling Pages.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['site/**', 'scripts/make_manifest.py', '.github/workflows/pages.yml']
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Get latest release image
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p _site/firmware
+          if ! gh release download --pattern '*-full.bin' --dir _site/firmware; then
+            echo "No release with a *-full.bin exists yet. Run the release workflow first."; exit 1
+          fi
+          TAG="$(gh release view --json tagName -q .tagName)"
+          python scripts/make_manifest.py "${TAG#v}" "$(basename _site/firmware/*-full.bin)" _site/manifest.json
+          cp site/index.html _site/
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deploy
+        uses: actions/deploy-pages@v4
