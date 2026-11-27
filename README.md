@@ -61,16 +61,25 @@ The 16 MB partition table (`default_16MB.csv`) has two app slots, so updates are
 
 Caveats: the on-device GitHub update does not verify TLS certificates and images are not signed, and it only works if the repository is public. All OTA paths are *untested on hardware*; keep USB access handy.
 
+## Controls and Home Assistant addresses
+
+- **Buttons:** toggle, on, off, scene, script, press, cover open/close/stop, lock/unlock, media play/pause. Buttons light up when the entity is on/open/playing/unlocked/heating.
+- **Sliders** (add with "+ Add slider" in the editor): light brightness, light color temperature (Kelvin), cover position, fan speed, media volume, climate target temperature, `number` and `input_number`. Sliders follow the entity's live value and send while you drag (at most every 300 ms) and on release. Optional `min`/`max` override the defaults. RGB color wheels and HVAC mode pickers are not done yet.
+- **Entity picker:** the editor loads your devices from Home Assistant (lights, switches, covers, fans, climate, media players, scenes, scripts, helpers, locks, buttons) so you can pick them by name; typing an id still works. It needs the Home Assistant connection to be up.
+- **Local and external URL:** Settings has a local address (tried first) and an optional external address, for example a Nabu Casa or reverse-proxy name. If the local one does not authenticate within 12 s the device switches to the external one, and while on external it retries local every 5 minutes.
+
 ## layout.json
 
 ```json
 {"pages":[{"name":"Bedroom","buttons":[
   {"id":"b1","label":"Lamp","icon":"power","x":10,"y":10,"w":150,"h":90,
-   "entity_id":"light.bedroom_lamp","action":"toggle","color":"#F5A623"}
+   "entity_id":"light.bedroom_lamp","action":"toggle","color":"#F5A623"},
+  {"id":"b2","type":"slider","label":"Brightness","x":170,"y":10,"w":220,"h":70,
+   "entity_id":"light.bedroom_lamp","attr":"brightness","color":"#F5A623"}
 ]}]}
 ```
 
-Coordinates are pixels in a 480x280 area (the bottom 40 px is the page tab/status bar). Actions: `toggle`, `on`, `off`, `scene`, `script`, `press`. Icons: `power, eye, home, play, pause, bell, settings, ok, wifi, audio, charge, image` (LVGL built-in symbols).
+Coordinates are pixels in a 480x280 area (the bottom 40 px is the page tab/status bar). Button actions: `toggle`, `on`, `off`, `scene`, `script`, `press`, `open`, `close`, `stop`, `lock`, `unlock`, `play_pause`. Sliders use `"type":"slider"` with optional `attr` (`brightness` or `color_temp` for lights), `min` and `max`. Icons: `power, eye, home, play, pause, bell, settings, ok, wifi, audio, charge, image` (LVGL built-in symbols).
 
 ## Layout of the code
 
