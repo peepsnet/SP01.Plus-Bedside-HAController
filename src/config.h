@@ -9,6 +9,10 @@ struct Config {
   String haHost;      // e.g. "homeassistant.local" or "192.168.1.10"
   uint16_t haPort = 8123;
   bool haTls = false;  // use wss:// instead of ws://
+  // Optional external URL, used when the local one is unreachable (e.g. Nabu Casa or a reverse proxy).
+  String haExtHost;
+  uint16_t haExtPort = 443;
+  bool haExtTls = true;
   String haToken;      // long-lived access token
   String hostname = "bedside";
   String adminPass;    // HTTP basic-auth password for the web UI (user: admin). Generated on first boot.

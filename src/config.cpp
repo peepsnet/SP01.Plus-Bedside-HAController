@@ -28,6 +28,9 @@ bool configLoad() {
   cfg.haHost = d["ha_host"] | "";
   cfg.haPort = d["ha_port"] | 8123;
   cfg.haTls = d["ha_tls"] | false;
+  cfg.haExtHost = d["ha_ext_host"] | "";
+  cfg.haExtPort = d["ha_ext_port"] | 443;
+  cfg.haExtTls = d["ha_ext_tls"] | true;
   cfg.haToken = d["ha_token"] | "";
   cfg.hostname = d["hostname"] | "bedside";
   cfg.adminPass = d["admin_pass"] | "";
@@ -41,6 +44,9 @@ bool configSave() {
   d["ha_host"] = cfg.haHost;
   d["ha_port"] = cfg.haPort;
   d["ha_tls"] = cfg.haTls;
+  d["ha_ext_host"] = cfg.haExtHost;
+  d["ha_ext_port"] = cfg.haExtPort;
+  d["ha_ext_tls"] = cfg.haExtTls;
   d["ha_token"] = cfg.haToken;
   d["hostname"] = cfg.hostname;
   d["admin_pass"] = cfg.adminPass;

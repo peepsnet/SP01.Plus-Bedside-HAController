@@ -59,7 +59,8 @@ void setup() {
   }
   Serial.printf("Bedside controller v%s\n", FW_VERSION);
 
-  uiInit([](const String& entity, const String& action) { haCallAction(entity, action); });
+  uiInit([](const String& entity, const String& action) { haCallAction(entity, action); },
+         [](const String& entity, const String& attr, float v) { haCallSlider(entity, attr, v); });
   menuInit();
   if (!uiBuild(layoutRead())) uiBuild(DEFAULT_LAYOUT);
 
@@ -67,7 +68,7 @@ void setup() {
   improvBegin();
   webBegin(applyLayout);
   if (!apMode) {
-    haBegin([](const String& e, const String& s) { uiSetState(e, s); },
+    haBegin([](const String& e, const String& s, const HaLevels& lv) { uiSetState(e, s, lv); },
             [](const String& st) { Serial.println(st); uiSetStatus(st); });
     haSetEntities(uiEntities());
   }
