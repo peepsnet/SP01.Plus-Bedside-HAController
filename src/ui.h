@@ -15,6 +15,8 @@ void uiInit(ButtonHandler onPress);
 bool uiBuild(const String& layoutJson);
 void uiSetState(const String& entityId, const String& state);
 void uiSetStatus(const String& text);
+// Large message card over the home screen (first-run / Wi-Fi help). Empty text hides it.
+void uiSetBanner(const String& text);
 // Unique entity ids referenced by the current layout (used for the HA subscription).
 std::vector<String> uiEntities();
 void uiTick();
