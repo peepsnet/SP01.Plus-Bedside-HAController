@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SC01 Plus Bedside Controller: web flasher</title>
+<script type="module" src="https://unpkg.com/esp-web-tools@10.0.1/dist/web/install-button.js?module"></script>
+<style>
+body{font:16px system-ui,sans-serif;background:#16181b;color:#e6e8ea;max-width:620px;margin:0 auto;padding:20px}
+a{color:#7ab}code{background:#23262a;padding:1px 5px;border-radius:4px}
+esp-web-install-button button{font-size:18px;padding:12px 22px;border-radius:8px;border:0;background:#2d7a3e;color:#fff;cursor:pointer}
+</style></head><body>
+<h1>SC01 Plus Bedside Controller</h1>
+<p>Install the firmware on a WT32-SC01 Plus straight from your browser (Chrome or Edge on desktop; Web Serial is required).</p>
+<ol>
+<li>Plug the board into this computer with a USB data cable.</li>
+<li>Click <b>Install</b>, pick the board's serial port, and confirm.</li>
+<li>When the install finishes, the flasher asks for your Wi-Fi network and password.</li>
+<li>Open <code>http://bedside.local/</code> (or the address shown) to build your layout and set up Home Assistant.</li>
+</ol>
+<esp-web-install-button manifest="manifest.json">
+  <button slot="activate">Install firmware</button>
+  <span slot="unsupported">This browser does not support Web Serial. Use Chrome or Edge on a desktop.</span>
+  <span slot="not-allowed">Web Serial needs a secure (https) page.</span>
+</esp-web-install-button>
+<p><small>Always installs the latest release. Existing layout and settings are kept unless you choose to erase the device.
+<a href="https://github.com/peepsnet/SP01.Plus-Bedside-HAController/releases">All releases</a> &middot;
+<a href="https://github.com/peepsnet/SP01.Plus-Bedside-HAController">Source and README</a></small></p>
+<p><small>Untested on hardware: if the board does not show up as a serial port, hold BOOT while plugging it in.</small></p>
+</body></html>

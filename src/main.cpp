@@ -4,6 +4,7 @@
 #include <WiFi.h>
 #include "config.h"
 #include "ha_client.h"
+#include "improv.h"
 #include "menu.h"
 #include "ui.h"
 #include "version.h"
@@ -59,6 +60,7 @@ void setup() {
   if (!uiBuild(layoutRead())) uiBuild(DEFAULT_LAYOUT);
 
   startWifi();
+  improvBegin();
   webBegin(applyLayout);
   if (!apMode) {
     haBegin([](const String& e, const String& s) { uiSetState(e, s); },
@@ -70,6 +72,7 @@ void setup() {
 void loop() {
   uiTick();
   webLoop();
+  improvLoop();
   if (!apMode) haLoop();
   delay(5);
 }

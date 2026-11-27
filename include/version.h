@@ -5,4 +5,5 @@
 #endif
 // GitHub repo used by the on-device "check for update" feature.
 #define GH_REPO "peepsnet/SP01.Plus-Bedside-HAController"
-#define GH_FIRMWARE_ASSET "firmware.bin"
+// Release asset that on-device updates download (the app-only image).
+#define GH_OTA_SUFFIX "-ota.bin"

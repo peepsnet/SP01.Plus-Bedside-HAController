@@ -16,7 +16,7 @@ Customizable Home Assistant bedside touchscreen for the **WT32-SC01 Plus** (ESP3
 
 1. Install [PlatformIO](https://platformio.org/).
 2. In Home Assistant: your profile page, Security, **Long-lived access tokens**, create one.
-3. Build and flash the firmware: `pio run -t upload`
+3. Flash the firmware: see "Installing the firmware" below (web flasher or `pio run -t upload`).
 4. Either configure on the device, or pre-load config:
    - Copy `data/config.example.json` to `data/config.json` (gitignored), fill it in, then `pio run -t uploadfs`.
    - Or skip that: join the `Bedside-Setup` Wi-Fi after first boot and fill in `/settings`.
@@ -28,17 +28,36 @@ Customizable Home Assistant bedside touchscreen for the **WT32-SC01 Plus** (ESP3
 
 The web UI uses HTTP basic auth: user `admin`, password generated on first boot. Find it on the touchscreen: tap the gear (bottom right), the Settings screen shows `Login: admin / <password>`. It is stored in `/config.json` on the device. This is HTTP, not HTTPS: it keeps casual LAN visitors out but passwords can be sniffed on the network.
 
+## Installing the firmware
+
+Release files come in two flavours. **Use the right one:**
+
+| File | What it is | Use it for |
+|---|---|---|
+| `SC01Plus-Bedside-HAController-vX.Y.Z-full.bin` | bootloader + partition table + app, one image | **First install**, flash at offset `0x0` |
+| `SC01Plus-Bedside-HAController-vX.Y.Z-ota.bin` | app only | Updates through the web `/update` page or the touchscreen |
+
+Flashing the `-ota.bin` (app-only) image at `0x0` leaves the board in a boot loop (`SHA-256 comparison failed ... Attempting to boot anyway`, `TG0WDT_SYS_RST`), because the ROM treats the app as the bootloader. Recovery is just flashing the `-full.bin` at `0x0`.
+
+**Web flasher (easiest):** open the project's GitHub Pages site (`https://peepsnet.github.io/SP01.Plus-Bedside-HAController/`, once Pages is enabled and a release has been published), click Install, then enter your Wi-Fi network when asked (Improv Wi-Fi provisioning over serial). Chrome or Edge on a desktop is required.
+
+**esptool:** `esptool.py --chip esp32s3 --baud 460800 write_flash 0x0 SC01Plus-Bedside-HAController-vX.Y.Z-full.bin`
+
+**From source:** `pio run -t upload` writes all parts at the right offsets. `pio run` also creates both release files in `dist/`.
+
 ## Versions and releases
 
-- The version lives in one place: the `VERSION` file (starts at `0.1.0`). `scripts/version.py` compiles it into the firmware; it is shown on the editor/update pages and the touchscreen Settings screen.
-- GitHub Actions (`.github/workflows/build.yml`) builds on every push and PR. To release: edit `VERSION` (e.g. `0.2.0`), merge, then `git tag v0.2.0 && git push origin v0.2.0`. The workflow checks the tag matches `VERSION`, builds, and creates a GitHub release with `firmware.bin` attached.
+- The version lives in one place: the `VERSION` file. `scripts/version.py` compiles it into the firmware; it is shown on the editor/update pages and the touchscreen Settings screen.
+- **Releasing:** on GitHub go to **Actions, release, Run workflow** on `main` and choose patch, minor or major. The workflow bumps `VERSION`, builds, commits `Release vX.Y.Z` to `main`, tags it, creates the GitHub release with the two `.bin` files, and redeploys the web flasher. No git commands needed. (If `main` is branch-protected, allow the Actions bot to push, or the commit step fails.)
+- One-time setup for the flasher: **Settings, Pages, Source: GitHub Actions**.
+- The `build` workflow compiles every push and PR and uploads the `.bin` files as an artifact.
 
 ## Updating the firmware (OTA)
 
-The 16 MB partition table (`default_16MB.csv`) has two app slots, so updates are OTA-safe. The first flash still needs USB (`pio run -t upload`).
+The 16 MB partition table (`default_16MB.csv`) has two app slots, so updates are OTA-safe.
 
-- **Web:** `http://bedside.local/update`, choose `firmware.bin`, upload. The device reboots.
-- **Touchscreen:** gear, **Check update** (asks GitHub for the latest release), then **Install** downloads `firmware.bin` from that release and flashes it.
+- **Web:** `http://bedside.local/update`, choose the `-ota.bin`, upload. The device reboots.
+- **Touchscreen:** gear, **Check update** (asks GitHub for the latest release), then **Install** downloads that release's `-ota.bin` and flashes it.
 
 Caveats: the on-device GitHub update does not verify TLS certificates and images are not signed, and it only works if the repository is public. All OTA paths are *untested on hardware*; keep USB access handy.
 
@@ -62,6 +81,9 @@ Coordinates are pixels in a 480x280 area (the bottom 40 px is the page tab/statu
 | `src/ha_client.cpp` | HA WebSocket auth, subscribe, service calls |
 | `src/web.cpp`, `src/web_pages.h` | HTTP API + editor and settings pages |
 | `src/config.cpp` | Settings and layout storage |
+| `src/improv.cpp` | Improv Wi-Fi serial provisioning *(untested)* |
+| `scripts/` | version injection, release-image merge, version bump, flasher manifest |
+| `site/` | web flasher page (ESP Web Tools) |
 
 ## Known gaps and guesses
 
