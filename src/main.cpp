@@ -35,7 +35,11 @@ static void startWifi() {
   if (apMode) {
     WiFi.mode(WIFI_AP);
     WiFi.softAP("Bedside-Setup");  // open AP; browse to http://192.168.4.1/settings
-    uiSetStatus("Setup AP: Bedside-Setup  192.168.4.1/settings");
+    uiSetStatus("Setup Wi-Fi: Bedside-Setup  192.168.4.1");
+    if (cfg.wifiSsid.isEmpty())
+      uiSetBanner("Wi-Fi is not set up yet\n1. On your phone, join Wi-Fi \"Bedside-Setup\"\n2. Open http://192.168.4.1/settings\nTap the gear for the web login.");
+    else
+      uiSetBanner("Could not join Wi-Fi \"" + cfg.wifiSsid + "\"\nJoin \"Bedside-Setup\" and open\nhttp://192.168.4.1/settings to fix it.");
   } else {
     MDNS.begin(cfg.hostname.c_str());
     MDNS.addService("http", "tcp", 80);

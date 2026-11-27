@@ -64,6 +64,8 @@ void uiInit(ButtonHandler onPress) {
 
   lv_obj_t* scr = lv_screen_active();
   lv_obj_set_style_bg_color(scr, lv_color_hex(0x101214), 0);
+  // LVGL's default text color is dark; set white on the screen so every label inherits readable text.
+  lv_obj_set_style_text_color(scr, lv_color_hex(0xFFFFFF), 0);
   lv_obj_remove_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
   canvasHolder = lv_obj_create(scr);
   lv_obj_remove_style_all(canvasHolder);
@@ -190,7 +192,8 @@ bool uiBuild(const String& layoutJson) {
   } else {
     statusLabel = lv_label_create(barHolder);
   }
-  lv_obj_set_style_text_color(statusLabel, lv_color_hex(0x8A9199), 0);
+  lv_obj_set_style_text_color(statusLabel, lv_color_hex(0xE8ECEF), 0);
+  lv_obj_set_style_text_font(statusLabel, &lv_font_montserrat_18, 0);
   lv_label_set_text(statusLabel, statusText.c_str());
   if (!pages.empty()) showPage(0);
   return true;
@@ -202,6 +205,35 @@ void uiSetState(const String& entityId, const String& state) {
   auto it = byEntity.find(entityId);
   if (it == byEntity.end()) return;
   for (auto* b : it->second) applyState(b, on);
+}
+
+static lv_obj_t* banner;
+static lv_obj_t* bannerLabel;
+
+void uiSetBanner(const String& text) {
+  if (!banner) {
+    banner = lv_obj_create(lv_screen_active());
+    lv_obj_set_size(banner, 440, LV_SIZE_CONTENT);
+    lv_obj_align(banner, LV_ALIGN_TOP_MID, 0, 60);
+    lv_obj_set_style_bg_color(banner, lv_color_hex(0x0B0E11), 0);
+    lv_obj_set_style_bg_opa(banner, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(banner, lv_color_hex(0xFFC107), 0);
+    lv_obj_set_style_border_width(banner, 3, 0);
+    lv_obj_set_style_radius(banner, 12, 0);
+    lv_obj_set_style_pad_all(banner, 14, 0);
+    lv_obj_remove_flag(banner, LV_OBJ_FLAG_SCROLLABLE);
+    bannerLabel = lv_label_create(banner);
+    lv_obj_set_width(bannerLabel, 410);
+    lv_obj_set_style_text_font(bannerLabel, &lv_font_montserrat_24, 0);
+    lv_obj_set_style_text_color(bannerLabel, lv_color_hex(0xFFFFFF), 0);
+  }
+  if (text.isEmpty()) {
+    lv_obj_add_flag(banner, LV_OBJ_FLAG_HIDDEN);
+  } else {
+    lv_label_set_text(bannerLabel, text.c_str());
+    lv_obj_remove_flag(banner, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(banner);
+  }
 }
 
 void uiSetStatus(const String& text) {

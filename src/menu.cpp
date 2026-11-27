@@ -24,8 +24,11 @@ static void say(const String& s) {
 
 static lv_obj_t* mkBtn(lv_obj_t* parent, const char* txt, lv_event_cb_t cb) {
   lv_obj_t* b = lv_button_create(parent);
-  lv_obj_set_size(b, LV_SIZE_CONTENT, 40);
+  lv_obj_set_size(b, LV_SIZE_CONTENT, 44);
+  lv_obj_set_style_bg_color(b, lv_color_hex(0x1976D2), 0);
   lv_obj_t* l = lv_label_create(b);
+  lv_obj_set_style_text_font(l, &lv_font_montserrat_18, 0);
+  lv_obj_set_style_text_color(l, lv_color_hex(0xFFFFFF), 0);
   lv_label_set_text(l, txt);
   lv_obj_center(l);
   lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, nullptr);
@@ -47,7 +50,9 @@ void menuInit() {
   panel = lv_obj_create(scr);
   lv_obj_set_size(panel, 480, 320);
   lv_obj_set_pos(panel, 0, 0);
-  lv_obj_set_style_bg_color(panel, lv_color_hex(0x181B1F), 0);
+  lv_obj_set_style_bg_color(panel, lv_color_hex(0x0B0E11), 0);
+  lv_obj_set_style_bg_opa(panel, LV_OPA_COVER, 0);
+  lv_obj_set_style_text_color(panel, lv_color_hex(0xFFFFFF), 0);  // high contrast: white on near-black
   lv_obj_set_style_radius(panel, 0, 0);
   lv_obj_set_style_border_width(panel, 0, 0);
   lv_obj_remove_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
@@ -59,13 +64,16 @@ void menuInit() {
   lv_obj_align(title, LV_ALIGN_TOP_LEFT, 0, 0);
 
   info = lv_label_create(panel);
-  lv_obj_set_style_text_font(info, &lv_font_montserrat_18, 0);
-  lv_obj_align(info, LV_ALIGN_TOP_LEFT, 0, 40);
+  lv_obj_set_style_text_font(info, &lv_font_montserrat_24, 0);
+  lv_obj_set_style_text_line_space(info, 6, 0);
+  lv_obj_align(info, LV_ALIGN_TOP_LEFT, 0, 44);
 
   result = lv_label_create(panel);
   lv_obj_set_width(result, 440);
+  lv_obj_set_style_text_font(result, &lv_font_montserrat_18, 0);
+  lv_obj_set_style_text_color(result, lv_color_hex(0xFFD54F), 0);
   lv_label_set_text(result, "");
-  lv_obj_align(result, LV_ALIGN_TOP_LEFT, 0, 160);
+  lv_obj_align(result, LV_ALIGN_TOP_LEFT, 0, 190);
 
   lv_obj_t* row = lv_obj_create(panel);
   lv_obj_remove_style_all(row);
