@@ -2,7 +2,7 @@
 
 Customizable Home Assistant bedside touchscreen for the **WT32-SC01 Plus** (ESP32-S3, 3.5" 480x320 capacitive touch), built with PlatformIO, Arduino, LovyanGFX and LVGL 9.
 
-> **Status: milestone one.** It compiles with `pio run`. **Nothing has been tested on real hardware yet.** Items marked *(guess)* are from published board pinouts or my assumptions and need a check on the device.
+> **Status: v0.1.0.** It compiles with `pio run`. **Nothing has been tested on real hardware yet.** Items marked *(guess)* are from published board pinouts or my assumptions and need a check on the device.
 
 ## What it does
 
@@ -23,6 +23,24 @@ Customizable Home Assistant bedside touchscreen for the **WT32-SC01 Plus** (ESP3
 5. Open `http://bedside.local/`, edit your buttons, hit **Save & apply**.
 
 `data/layout.json` is the default layout uploaded by `uploadfs`. Note `uploadfs` overwrites the layout on the device, so use it only for first setup.
+
+## Web login
+
+The web UI uses HTTP basic auth: user `admin`, password generated on first boot. Find it on the touchscreen: tap the gear (bottom right), the Settings screen shows `Login: admin / <password>`. It is stored in `/config.json` on the device. This is HTTP, not HTTPS: it keeps casual LAN visitors out but passwords can be sniffed on the network.
+
+## Versions and releases
+
+- The version lives in one place: the `VERSION` file (starts at `0.1.0`). `scripts/version.py` compiles it into the firmware; it is shown on the editor/update pages and the touchscreen Settings screen.
+- GitHub Actions (`.github/workflows/build.yml`) builds on every push and PR. To release: edit `VERSION` (e.g. `0.2.0`), merge, then `git tag v0.2.0 && git push origin v0.2.0`. The workflow checks the tag matches `VERSION`, builds, and creates a GitHub release with `firmware.bin` attached.
+
+## Updating the firmware (OTA)
+
+The 16 MB partition table (`default_16MB.csv`) has two app slots, so updates are OTA-safe. The first flash still needs USB (`pio run -t upload`).
+
+- **Web:** `http://bedside.local/update`, choose `firmware.bin`, upload. The device reboots.
+- **Touchscreen:** gear, **Check update** (asks GitHub for the latest release), then **Install** downloads `firmware.bin` from that release and flashes it.
+
+Caveats: the on-device GitHub update does not verify TLS certificates and images are not signed, and it only works if the repository is public. All OTA paths are *untested on hardware*; keep USB access handy.
 
 ## layout.json
 

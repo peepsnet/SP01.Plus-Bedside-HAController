@@ -71,7 +71,7 @@ void uiInit(ButtonHandler onPress) {
   lv_obj_set_pos(canvasHolder, 0, 0);
   barHolder = lv_obj_create(scr);
   lv_obj_remove_style_all(barHolder);
-  lv_obj_set_size(barHolder, 480, 40);
+  lv_obj_set_size(barHolder, 430, 40);
   lv_obj_set_pos(barHolder, 0, UI_CANVAS_H);
   lv_obj_set_flex_flow(barHolder, LV_FLEX_FLOW_ROW);
   lv_obj_set_flex_align(barHolder, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);

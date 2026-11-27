@@ -2,19 +2,31 @@
 #include "config.h"
 #include "web_pages.h"
 #include <ArduinoJson.h>
+#include <Update.h>
 #include <WebServer.h>
+#include "version.h"
 
 static WebServer server(80);
 static std::function<bool(const String&)> layoutCb;
+static bool updateOk = false;
+
+// HTTP basic auth (user "admin"). Credentials are sent unencrypted over plain HTTP: LAN use only.
+static bool authed() {
+  if (server.authenticate("admin", cfg.adminPass.c_str())) return true;
+  server.requestAuthentication(BASIC_AUTH, "Bedside");
+  return false;
+}
+#define AUTH() if (!authed()) return
 
 void webBegin(std::function<bool(const String&)> onLayout) {
   layoutCb = onLayout;
 
-  server.on("/", HTTP_GET, [] { server.send_P(200, "text/html", EDITOR_HTML); });
-  server.on("/settings", HTTP_GET, [] { server.send_P(200, "text/html", SETTINGS_HTML); });
+  server.on("/", HTTP_GET, [] { AUTH(); server.send_P(200, "text/html", EDITOR_HTML); });
+  server.on("/settings", HTTP_GET, [] { AUTH(); server.send_P(200, "text/html", SETTINGS_HTML); });
 
-  server.on("/api/layout", HTTP_GET, [] { server.send(200, "application/json", layoutRead()); });
+  server.on("/api/layout", HTTP_GET, [] { AUTH(); server.send(200, "application/json", layoutRead()); });
   server.on("/api/layout", HTTP_POST, [] {
+    AUTH();
     String body = server.arg("plain");
     if (!layoutCb || !layoutCb(body)) {  // callback validates + rebuilds the UI
       server.send(400, "text/plain", "invalid layout");
@@ -26,16 +38,19 @@ void webBegin(std::function<bool(const String&)> onLayout) {
 
   // Secrets are never sent back to the browser: only whether they are set.
   server.on("/api/config", HTTP_GET, [] {
+    AUTH();
     JsonDocument d;
     d["wifi_ssid"] = cfg.wifiSsid;
     d["ha_host"] = cfg.haHost;
     d["ha_port"] = cfg.haPort;
     d["ha_tls"] = cfg.haTls;
+    d["version"] = FW_VERSION;
     String out;
     serializeJson(d, out);
     server.send(200, "application/json", out);
   });
   server.on("/api/config", HTTP_POST, [] {
+    AUTH();
     JsonDocument d;
     if (deserializeJson(d, server.arg("plain"))) {
       server.send(400, "text/plain", "bad json");
@@ -57,6 +72,28 @@ void webBegin(std::function<bool(const String&)> onLayout) {
     delay(500);
     ESP.restart();
   });
+  server.on("/update", HTTP_GET, [] { AUTH(); server.send_P(200, "text/html", UPDATE_HTML); });
+  server.on("/api/version", HTTP_GET, [] { AUTH(); server.send(200, "text/plain", FW_VERSION); });
+  server.on("/update", HTTP_POST,
+    [] {
+      if (!authed()) return;
+      server.send(updateOk ? 200 : 500, "text/plain", updateOk ? "ok, rebooting" : Update.errorString());
+      if (updateOk) { delay(500); ESP.restart(); }
+    },
+    [] {
+      if (!server.authenticate("admin", cfg.adminPass.c_str())) return;
+      HTTPUpload& u = server.upload();
+      if (u.status == UPLOAD_FILE_START) {
+        updateOk = false;
+        Update.begin(UPDATE_SIZE_UNKNOWN);
+      } else if (u.status == UPLOAD_FILE_WRITE) {
+        Update.write(u.buf, u.currentSize);
+      } else if (u.status == UPLOAD_FILE_END) {
+        updateOk = Update.end(true);
+      } else if (u.status == UPLOAD_FILE_ABORTED) {
+        Update.abort();
+      }
+    });
   server.begin();
 }
 

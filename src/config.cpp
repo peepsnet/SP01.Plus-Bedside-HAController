@@ -30,6 +30,7 @@ bool configLoad() {
   cfg.haTls = d["ha_tls"] | false;
   cfg.haToken = d["ha_token"] | "";
   cfg.hostname = d["hostname"] | "bedside";
+  cfg.adminPass = d["admin_pass"] | "";
   return true;
 }
 
@@ -42,6 +43,7 @@ bool configSave() {
   d["ha_tls"] = cfg.haTls;
   d["ha_token"] = cfg.haToken;
   d["hostname"] = cfg.hostname;
+  d["admin_pass"] = cfg.adminPass;
   File f = LittleFS.open("/config.json", "w");
   if (!f) return false;
   serializeJson(d, f);
