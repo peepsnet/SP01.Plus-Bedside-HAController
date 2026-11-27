@@ -1,0 +1,9 @@
+{
+  "wifi_ssid": "YourWifi",
+  "wifi_pass": "YourWifiPassword",
+  "ha_host": "homeassistant.local",
+  "ha_port": 8123,
+  "ha_tls": false,
+  "ha_token": "PASTE_LONG_LIVED_TOKEN",
+  "hostname": "bedside"
+}

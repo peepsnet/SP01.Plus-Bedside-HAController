@@ -1,0 +1,11 @@
+{
+  "pages": [
+    {
+      "name": "Bedroom",
+      "buttons": [
+        {"id":"b1","label":"Lamp","icon":"power","x":10,"y":10,"w":150,"h":90,"entity_id":"light.bedroom_lamp","action":"toggle","color":"#F5A623"},
+        {"id":"b2","label":"Ceiling","icon":"eye","x":170,"y":10,"w":150,"h":90,"entity_id":"light.bedroom_ceiling","action":"toggle","color":"#4A90E2"}
+      ]
+    }
+  ]
+}
