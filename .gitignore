@@ -2,3 +2,4 @@
 .vscode/
 # Local secrets: Wi-Fi + Home Assistant token. Never commit.
 data/config.json
+dist/

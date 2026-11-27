@@ -40,13 +40,33 @@ bool otaIsNewer(const String& tag) {
   return false;
 }
 
+// Finds the "*-ota.bin" asset of the latest release and flashes it. Reboots on success.
 String otaInstallLatest() {
+  String url;
+  {
+    WiFiClientSecure c;
+    c.setInsecure();
+    HTTPClient h;
+    h.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+    if (!h.begin(c, "https://api.github.com/repos/" GH_REPO "/releases/latest")) return "begin failed";
+    h.addHeader("User-Agent", "bedside-controller");
+    if (h.GET() != 200) return "release lookup failed";
+    JsonDocument filter;
+    filter["assets"][0]["name"] = true;
+    filter["assets"][0]["browser_download_url"] = true;
+    JsonDocument d;
+    if (deserializeJson(d, h.getStream(), DeserializationOption::Filter(filter))) return "bad release json";
+    for (JsonObject a : d["assets"].as<JsonArray>()) {
+      String n = a["name"] | "";
+      if (n.endsWith(GH_OTA_SUFFIX)) url = String(a["browser_download_url"] | "");
+    }
+  }
+  if (url.isEmpty()) return "no " GH_OTA_SUFFIX " asset in latest release";
   WiFiClientSecure c;
   c.setInsecure();
   httpUpdate.setFollowRedirects(HTTPC_FORCE_FOLLOW_REDIRECTS);  // GitHub redirects to a CDN
   httpUpdate.rebootOnUpdate(true);
-  t_httpUpdate_return r =
-      httpUpdate.update(c, "https://github.com/" GH_REPO "/releases/latest/download/" GH_FIRMWARE_ASSET);
+  t_httpUpdate_return r = httpUpdate.update(c, url);
   if (r == HTTP_UPDATE_NO_UPDATES) return "No update";
   if (r == HTTP_UPDATE_FAILED) return httpUpdate.getLastErrorString();
   return "";

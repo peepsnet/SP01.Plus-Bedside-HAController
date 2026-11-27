@@ -1,0 +1,78 @@
+name: release
+
+# Manual: Actions tab -> release -> Run workflow -> pick patch / minor / major.
+# Bumps VERSION, builds, commits and tags it, publishes a GitHub release with the firmware files,
+# and updates the web flasher on GitHub Pages.
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Version bump
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency: release
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - name: Only release from main
+        run: |
+          [ "${GITHUB_REF}" = "refs/heads/main" ] || { echo "Run this workflow on main"; exit 1; }
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            .pio/libdeps
+          key: pio-${{ hashFiles('platformio.ini') }}
+      - run: pip install platformio
+
+      - name: Bump version
+        id: ver
+        run: echo "version=$(python scripts/bump_version.py '${{ inputs.bump }}')" >> "$GITHUB_OUTPUT"
+
+      - run: pio run
+
+      - name: Commit and tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add VERSION
+          git commit -m "Release v${{ steps.ver.outputs.version }}"
+          git tag "v${{ steps.ver.outputs.version }}"
+          git push origin HEAD:main "v${{ steps.ver.outputs.version }}"
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v${{ steps.ver.outputs.version }}" dist/*.bin \
+            --title "v${{ steps.ver.outputs.version }}" --generate-notes
+
+      - name: Assemble web flasher site
+        run: |
+          mkdir -p _site/firmware
+          cp site/index.html _site/
+          cp dist/*-full.bin _site/firmware/
+          python scripts/make_manifest.py "${{ steps.ver.outputs.version }}" \
+            "$(basename dist/*-full.bin)" _site/manifest.json
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deploy
+        uses: actions/deploy-pages@v4
