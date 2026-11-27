@@ -48,8 +48,8 @@ Flashing the `-ota.bin` (app-only) image at `0x0` leaves the board in a boot loo
 ## Versions and releases
 
 - The version lives in one place: the `VERSION` file. `scripts/version.py` compiles it into the firmware; it is shown on the editor/update pages and the touchscreen Settings screen.
-- **Releasing:** on GitHub go to **Actions, release, Run workflow** on `main` and choose patch, minor or major. The workflow bumps `VERSION`, builds, commits `Release vX.Y.Z` to `main`, tags it, creates the GitHub release with the two `.bin` files, and redeploys the web flasher. No git commands needed. (If `main` is branch-protected, allow the Actions bot to push, or the commit step fails.)
-- One-time setup for the flasher: **Settings, Pages, Source: GitHub Actions**.
+- **Releasing:** on GitHub go to **Actions, release, Run workflow** on `main` and choose patch, minor or major. The workflow bumps `VERSION`, builds, commits `Release vX.Y.Z` to `main`, tags it, creates the GitHub release with the two `.bin` files, and then starts the `pages` workflow to update the web flasher. No git commands needed. (If `main` is branch-protected, allow the Actions bot to push, or the commit step fails.)
+- One-time setup for the flasher: **Settings, Pages, Source: GitHub Actions**, then run **Actions, pages, Run workflow** once (it publishes the latest release's full image). Later releases update it automatically.
 - The `build` workflow compiles every push and PR and uploads the `.bin` files as an artifact.
 
 ## Updating the firmware (OTA)
