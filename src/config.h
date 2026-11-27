@@ -11,6 +11,7 @@ struct Config {
   bool haTls = false;  // use wss:// instead of ws://
   String haToken;      // long-lived access token
   String hostname = "bedside";
+  String adminPass;    // HTTP basic-auth password for the web UI (user: admin). Generated on first boot.
 };
 
 extern Config cfg;

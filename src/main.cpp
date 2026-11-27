@@ -4,7 +4,9 @@
 #include <WiFi.h>
 #include "config.h"
 #include "ha_client.h"
+#include "menu.h"
 #include "ui.h"
+#include "version.h"
 #include "web.h"
 
 static bool apMode = false;
@@ -44,8 +46,16 @@ void setup() {
   Serial.begin(115200);
   if (!LittleFS.begin(true)) Serial.println("LittleFS mount failed");
   configLoad();
+  if (cfg.adminPass.isEmpty()) {  // first boot: generate a web UI password, shown in the touchscreen settings menu
+    char buf[10];
+    snprintf(buf, sizeof buf, "%08x", (unsigned)esp_random());
+    cfg.adminPass = buf;
+    configSave();
+  }
+  Serial.printf("Bedside controller v%s\n", FW_VERSION);
 
   uiInit([](const String& entity, const String& action) { haCallAction(entity, action); });
+  menuInit();
   if (!uiBuild(layoutRead())) uiBuild(DEFAULT_LAYOUT);
 
   startWifi();
