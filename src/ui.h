@@ -22,3 +22,8 @@ void uiSetBanner(const String& text);
 // Unique entity ids referenced by the current layout (used for the HA subscription).
 std::vector<String> uiEntities();
 void uiTick();
+
+// Backlight in percent, clamped to the configured min..max. save=true also stores it in /config.json.
+void uiSetBrightnessPct(int pct, bool save);
+// Implemented in menu.cpp: true while the Settings overlay is showing (swipe gestures are ignored then).
+bool menuIsOpen();

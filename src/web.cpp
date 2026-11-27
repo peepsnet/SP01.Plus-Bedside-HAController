@@ -48,6 +48,8 @@ void webBegin(std::function<bool(const String&)> onLayout) {
     d["ha_ext_host"] = cfg.haExtHost;
     d["ha_ext_port"] = cfg.haExtPort;
     d["ha_ext_tls"] = cfg.haExtTls;
+    d["bright_min"] = cfg.brightMinPct;
+    d["bright_max"] = cfg.brightMaxPct;
     d["version"] = FW_VERSION;
     String out;
     serializeJson(d, out);
@@ -69,6 +71,9 @@ void webBegin(std::function<bool(const String&)> onLayout) {
     cfg.haExtHost = d["ha_ext_host"] | cfg.haExtHost;
     cfg.haExtPort = d["ha_ext_port"] | cfg.haExtPort;
     cfg.haExtTls = d["ha_ext_tls"] | cfg.haExtTls;
+    cfg.brightMinPct = d["bright_min"] | cfg.brightMinPct;
+    cfg.brightMaxPct = d["bright_max"] | cfg.brightMaxPct;
+    configClampBrightness();  // enforce sane limits server-side as well
     String tok = d["ha_token"] | "";
     if (tok.length()) cfg.haToken = tok;
     if (!configSave()) {

@@ -107,3 +107,5 @@ void menuInit() {
     lv_obj_move_foreground(panel);
   }, LV_EVENT_CLICKED, nullptr);
 }
+
+bool menuIsOpen() { return panel && !lv_obj_has_flag(panel, LV_OBJ_FLAG_HIDDEN); }

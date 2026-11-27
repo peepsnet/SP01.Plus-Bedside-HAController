@@ -18,6 +18,12 @@ const char* DEFAULT_LAYOUT = R"JSON({
   ]
 })JSON";
 
+void configClampBrightness() {
+  cfg.brightMinPct = constrain(cfg.brightMinPct, 5, 90);
+  cfg.brightMaxPct = constrain(cfg.brightMaxPct, cfg.brightMinPct + 10, 100);
+  cfg.brightnessPct = constrain(cfg.brightnessPct, cfg.brightMinPct, cfg.brightMaxPct);
+}
+
 bool configLoad() {
   File f = LittleFS.open("/config.json", "r");
   if (!f) return false;
@@ -34,6 +40,10 @@ bool configLoad() {
   cfg.haToken = d["ha_token"] | "";
   cfg.hostname = d["hostname"] | "bedside";
   cfg.adminPass = d["admin_pass"] | "";
+  cfg.brightMinPct = d["bright_min"] | 10;
+  cfg.brightMaxPct = d["bright_max"] | 100;
+  cfg.brightnessPct = d["brightness"] | 80;
+  configClampBrightness();
   return true;
 }
 
@@ -50,6 +60,9 @@ bool configSave() {
   d["ha_token"] = cfg.haToken;
   d["hostname"] = cfg.hostname;
   d["admin_pass"] = cfg.adminPass;
+  d["bright_min"] = cfg.brightMinPct;
+  d["bright_max"] = cfg.brightMaxPct;
+  d["brightness"] = cfg.brightnessPct;
   File f = LittleFS.open("/config.json", "w");
   if (!f) return false;
   serializeJson(d, f);

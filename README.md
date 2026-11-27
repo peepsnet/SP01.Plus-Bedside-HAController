@@ -68,6 +68,16 @@ Caveats: the on-device GitHub update does not verify TLS certificates and images
 - **Entity picker:** the editor loads your devices from Home Assistant (lights, switches, covers, fans, climate, media players, scenes, scripts, helpers, locks, buttons) so you can pick them by name; typing an id still works. It needs the Home Assistant connection to be up.
 - **Local and external URL:** Settings has a local address (tried first) and an optional external address, for example a Nabu Casa or reverse-proxy name. If the local one does not authenticate within 12 s the device switches to the external one, and while on external it retries local every 5 minutes.
 
+## Touchscreen gestures and brightness
+
+- **Swipe down from the top edge** to open the brightness panel (like an Android quick panel). Drag the slider; the change is applied live and saved when you let go. The panel closes after 6 s idle, when you tap outside it, or when you swipe up.
+- The slider only covers the **minimum and maximum brightness** set on the Settings page (limits: minimum 5 to 90 %, maximum at least 10 points above the minimum and up to 100 %), so the screen can never be turned fully dark.
+- **Swipe left or right** to change page. Swipes that start on a slider are ignored, and a swipe never triggers the button it ends on. *All gesture thresholds are guesses, untested on the real touch panel.*
+
+## Layout editor sizes
+
+Sizes and positions are shown and editable in **grid cells** (1 cell = 20 px, so the usable area is 24 x 14 cells): width, height, column and row, next to drag and resize, which now snap to the grid. `layout.json` still stores pixels, so existing layouts keep working; a button that is not a whole number of cells shows a fraction such as 7.5 x 4.5.
+
 ## layout.json
 
 ```json
