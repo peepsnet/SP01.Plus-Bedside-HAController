@@ -92,6 +92,7 @@ Add a **camera button** in the layout editor (`type: "camera"`). Give it either 
 
 - **Full brightness option:** tick *Force full screen brightness while the camera is open* in the camera button's settings in the web editor (`"full_brightness": true`). The backlight goes to 100 % (ignoring the brightness maximum) while the view is open and returns to your saved brightness when it closes. There is no on-screen button editor, so this is set in the web editor only.
 - Formats: MJPEG (`multipart/x-mixed-replace`) or JPEG snapshots (polled repeatedly). RTSP and H.264 are not supported and cannot be on this chip. Progressive JPEGs are not supported.
+- **Picture size:** the picture is scaled as large as possible on the screen with its aspect ratio kept, with black bars where it doesn't fill (a 640x480 camera shows at 427x320 on the landscape screen). The scaling happens while the JPEG is decoded (the decoder's 1/2, 1/4, 1/8 reduction plus a cheap nearest-pixel resample for the remainder). Cameras whose size needs no resample (exactly 1, 1/2, 1/4 or 1/8 of the screen fit) are fastest; expect a few fps less than with the old fixed sizes at awkward factors (an estimate, not measured).
 - Home Assistant entity: it tries `/api/camera_proxy_stream/<entity>` first and falls back to snapshots (`/api/camera_proxy/<entity>`).
 - Expected frame rate (an estimate, *not measured*): a native MJPEG camera at 640x480 may reach roughly 8 to 15 fps; larger frames or weak Wi-Fi are slower. Cameras that HA turns into a stream itself (RTSP, ONVIF and most generic cameras) are usually limited by HA to about 1 to 2 fps. Snapshot polling is about 2 to 5 fps. This is not full-motion video for every camera: for the best result use a camera's own MJPEG URL at 640x480 or lower.
 - Frames are shown at 1, 1/2, 1/4 or 1/8 size so they fit the screen without slow resampling (a 640x480 picture shows at 320x240, centered). The overlay shows the live fps.
@@ -118,6 +119,8 @@ The editor preview draws each button with its icon and the device text sizes (ic
 
 Button labels shrink to fit: the device (and the preview) uses the largest of 18, 16, 14 or 12 px that fits the button width on one line; if 12 px is still too long the text wraps to two lines (one line on buttons under 60 px tall) and ends in `...`. Sliders have a 10 px track and a 20 px knob.
 
+**Buttons fit their contents at any size** (device and preview use the same rules, with the same maximums: label 18 px, icon 24 px, track 10 px). The label shrinks to fit the width first; if label and icon together are too tall, the icon shrinks (24, 18, 14, 12 px), then the label font, and only as a last resort the icon is left out. A slider built into the button takes the bottom third of the button (18 to 34 px) and its track and knob shrink with it.
+
 ## layout.json
 
 ```json
@@ -129,7 +132,7 @@ Button labels shrink to fit: the device (and the preview) uses the largest of 18
 ]}]}
 ```
 
-Coordinates are pixels in a 480x280 area (the bottom 40 px is the page tab/status bar). Button actions: `toggle`, `on`, `off`, `scene`, `script`, `press`, `open`, `close`, `stop`, `lock`, `unlock`, `play_pause`. Sliders use `"type":"slider"` with optional `attr` (`brightness` or `color_temp` for lights), `min` and `max`. Icons: `power, eye, home, play, pause, bell, settings, ok, wifi, audio, charge, image` (LVGL built-in symbols).
+Coordinates are pixels in a 480x280 area (the bottom 40 px is the page tab/status bar). Button actions: `toggle`, `on`, `off`, `scene`, `script`, `press`, `open`, `close`, `stop`, `lock`, `unlock`, `play_pause`. Sliders use `"type":"slider"` with optional `attr` (`brightness` or `color_temp` for lights), `min` and `max`. Icons: `power, eye, home, play, pause, bell, settings, ok, wifi, audio, charge, image, video, fan` (LVGL built-in symbols; `fan` is a ceiling fan drawn from a small bitmap in `src/fan_icon.h`).
 
 ## Layout of the code
 

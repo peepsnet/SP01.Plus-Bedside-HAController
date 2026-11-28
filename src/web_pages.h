@@ -80,7 +80,7 @@ let S=1.5,W=480,H=280;const G=20,SMAX=1.5;  // G = grid cell in screen pixels
 let orient='landscape';
 const Q=G/4;  // moving and resizing snap to a quarter of a grid cell (5 px)
 const cells=v=>Math.round(v/G*100)/100;
-const ICONS=['','power','eye','home','play','pause','bell','settings','ok','wifi','audio','charge','image','video'];
+const ICONS=['','power','eye','home','play','pause','bell','settings','ok','wifi','audio','charge','image','video','fan'];
 const ACTIONS=[['toggle','Toggle'],['on','Turn on'],['off','Turn off'],['scene','Activate scene'],['script','Run script'],['press','Press button'],['open','Cover: open'],['close','Cover: close'],['stop','Cover: stop'],['lock','Lock'],['unlock','Unlock'],['play_pause','Media: play/pause']];
 let L={pages:[]},pi=0,sel=null;
 ICONS.forEach(i=>$('icon').add(new Option(i||'(none)',i)));
@@ -124,20 +124,30 @@ const ICON_SVG={
  audio:'<svg viewBox="0 0 24 24"><path d="M3 9h4l5-5v16l-5-5H3zM15 8.500a5 5 0 0 1 0 7l-1.200-1.200a3.300 3.300 0 0 0 0-4.600zM17.500 6a8.500 8.500 0 0 1 0 12l-1.200-1.200a6.800 6.800 0 0 0 0-9.600z"/></svg>',
  charge:'<svg viewBox="0 0 24 24"><path d="M13 2L4 14h6l-2 8 10-13h-6z"/></svg>',
  image:'<svg viewBox="0 0 24 24"><path d="M2 4h20v16H2zm2 2v9l4-4 4 4 3-3 5 5V6zm12 3a2 2 0 1 0 0-.1z" fill-rule="evenodd"/></svg>',
- video:'<svg viewBox="0 0 24 24"><path d="M2 5h14v14H2zM18 9.500L22 7v10l-4-2.500z"/></svg>'};
-// Same rule as the device: the largest of 18/16/14/12 px whose text fits the button width less 12 px of padding; at 12 px
-// the text is cut with an ellipsis. Measured with the browser's font, so it can differ by a few pixels from the device.
+ video:'<svg viewBox="0 0 24 24"><path d="M2 5h14v14H2zM18 9.500L22 7v10l-4-2.500z"/></svg>',
+ fan:'<svg viewBox="0 0 24 24"><g id="fb"><rect x="10" y="2" width="5" height="7" rx="2.500"/></g><use href="#fb" transform="rotate(90 12 12)"/><use href="#fb" transform="rotate(180 12 12)"/><use href="#fb" transform="rotate(270 12 12)"/><path d="M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6zm0 2a1 1 0 1 1 0 2 1 1 0 0 1 0-2z" fill-rule="evenodd"/></svg>'};
+// Same rules as the device (btnFit in ui.cpp): the label takes the largest of 18/16/14/12 px that fits the width (wrapping to 2 lines,
+// cut with "...", at 12 px); if label + icon are too tall the icon shrinks first (24/18/14/12), then the label font, and only as a
+// last resort the icon is left out. A slider built into the button takes its bottom third (18..34 px) and its track shrinks with it.
+// Measured with the browser's font, so it can differ by a few pixels from the device.
 const mctx=document.createElement('canvas').getContext('2d');
-function fitPx(txt,avail){for(const px of [18,16,14,12]){mctx.font='500 '+px+'px Montserrat,"Segoe UI",system-ui,sans-serif';if(mctx.measureText(txt).width<=avail)return px}return 12}
-// When even 12 px does not fit on one line the label wraps to 2 lines (1 if the button is under 60 px tall) and is cut with an ellipsis.
-function inlineTrack(d,b){const L0=14*S,len=(b.w-28)*S,TR=10,KN=20;
+const LPX=[18,16,14,12],LH=[21,18,16,15],IPX=[24,18,14,12],IH=[27,21,16,15];
+const tw=(t,px)=>{mctx.font='500 '+px+'px Montserrat,"Segoe UI",system-ui,sans-serif';return mctx.measureText(t).width};
+const slArea=h=>Math.max(18,Math.min(34,Math.floor(h/3))),trPx=a=>a>=30?10:(a>=24?8:6);
+function btnFit(label,bw,area,hasIcon){
+ const avail=bw-12,room=area-4;let first=3,fitsW=false;
+ for(let i=0;i<4;i++)if(tw(label,LPX[i])<=avail){first=i;fitsW=true;break}
+ if(!label){for(let k=0;hasIcon&&k<4;k++)if(IPX[k]<=room&&IPX[k]<=bw-8)return{lbl:3,lines:1,icon:k};return{lbl:3,lines:1,icon:-1}}
+ for(let i=first;i<4;i++){
+  const one=tw(label,LPX[i])<=avail,lines=one?1:2,lh=LH[i]*lines;
+  for(let k=0;hasIcon&&k<4;k++){if(IPX[k]>bw-8)continue;if(lh+IH[k]+2<=room)return{lbl:i,lines,icon:k}}
+  if(!hasIcon&&lh<=room)return{lbl:i,lines,icon:-1}}
+ return{lbl:3,lines:1,icon:-1}}
+function inlineTrack(d,b){const A=slArea(b.h),TR=trPx(A),KN=2*TR,m=Math.max(TR+1,Math.min(14,Math.floor(b.w/6))),L0=m*S,len=(b.w-2*m)*S,bot=Math.max(2,Math.floor((A-TR)/2)-2)*S;
  const mk=css=>{const i=document.createElement('i');i.style.cssText=css;d.appendChild(i)};
- mk(`background:rgba(0,0,0,.3);border-radius:999px;left:${L0}px;width:${len}px;bottom:${10*S}px;height:${TR*S}px`);
- mk(`background:#fff;border-radius:999px;left:${L0}px;width:${len/2}px;bottom:${10*S}px;height:${TR*S}px`);
- mk(`background:#fff;border-radius:50%;left:${L0+len/2-KN/2*S}px;bottom:${(10+TR/2-KN/2)*S}px;width:${KN*S}px;height:${KN*S}px;box-shadow:0 0 0 ${S}px #0003`)}
-function wrapLbl(t,b){mctx.font='500 12px Montserrat,"Segoe UI",system-ui,sans-serif';
- const long=mctx.measureText(t.textContent).width>b.w-12;
- t.style.cssText+=long?`;white-space:normal;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:${(b.h-(b.with_slider&&b.type!='camera'?34:0))>=60?2:1};line-clamp:${(b.h-(b.with_slider&&b.type!='camera'?34:0))>=60?2:1};overflow:hidden;width:${(b.w-12)*S}px;line-height:${14*S}px;max-height:${((b.h-(b.with_slider&&b.type!='camera'?34:0))>=60?2:1)*14*S}px`:''}
+ mk(`background:rgba(0,0,0,.3);border-radius:999px;left:${L0}px;width:${len}px;bottom:${bot}px;height:${TR*S}px`);
+ mk(`background:#fff;border-radius:999px;left:${L0}px;width:${len/2}px;bottom:${bot}px;height:${TR*S}px`);
+ mk(`background:#fff;border-radius:50%;left:${L0+len/2-KN/2*S}px;bottom:${bot+(TR/2-KN/2)*S}px;width:${KN*S}px;height:${KN*S}px;box-shadow:0 0 0 ${S}px #0003`)}
 function draw(){
  $('tabs').innerHTML='';
  L.pages.forEach((p,i)=>{const t=document.createElement('button');t.className='tab'+(i==pi?' on':'');t.textContent=p.name;t.onclick=()=>{pi=i;sel=null;draw()};$('tabs').appendChild(t)});
@@ -170,10 +180,12 @@ function draw(){
    d.appendChild(bar);d.appendChild(fill);d.appendChild(knob);
   }else{
    const ws=!!b.with_slider&&b.type!='camera';
-   d.style.padding='0 '+6*S+'px '+(ws?34*S:0)+'px';
-   const ic=ICON_SVG[b.icon||(b.type=='camera'?'video':'')];
-   if(ic){const s=document.createElement('span');s.innerHTML=ic;const v=s.firstChild;v.setAttribute('width',24*S);v.setAttribute('height',24*S);s.style.cssText='display:flex;max-width:none';d.appendChild(s)}
-   const t=document.createElement('span');t.className='lbl'+(b.label?'':' ent');t.style.fontSize=fitPx(b.label||b.entity_id||'',b.w-12)*S+'px';t.textContent=b.label||b.entity_id||'';d.appendChild(t);wrapLbl(t,b);
+   const sa=ws?slArea(b.h):0;d.style.padding='0 '+6*S+'px '+sa*S+'px';
+   const ic=ICON_SVG[b.icon||(b.type=='camera'?'video':'')],txt=b.label||b.entity_id||'';
+   const f=btnFit(txt,b.w,b.h-sa,!!ic);
+   if(ic&&f.icon>=0){const s=document.createElement('span');s.innerHTML=ic;const v=s.firstChild;v.setAttribute('width',IPX[f.icon]*S);v.setAttribute('height',IPX[f.icon]*S);s.style.cssText='display:flex;max-width:none';d.appendChild(s)}
+   const t=document.createElement('span');t.className='lbl'+(b.label?'':' ent');t.style.fontSize=LPX[f.lbl]*S+'px';t.textContent=txt;d.appendChild(t);
+   if(f.lines>1||tw(txt,LPX[f.lbl])>b.w-12)t.style.cssText+=`;white-space:normal;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:${f.lines};line-clamp:${f.lines};overflow:hidden;width:${(b.w-12)*S}px;line-height:${LH[f.lbl]*S}px;max-height:${f.lines*LH[f.lbl]*S}px`;
    if(ws)inlineTrack(d,b);
   }
   d.onpointerdown=e=>{sel=i;drag(e,b,'move');showProps();markSel()};
@@ -239,7 +251,7 @@ for(const k of FIELDS)$(k).oninput=()=>{
  const b=L.pages[pi].buttons[sel];
  if((k=='min'||k=='max')){if($(k).value==='')delete b[k];else b[k]=+$(k).value}else b[k]=$(k).value;
  const d=$('canvas').children[sel];
- if(k=='label'||k=='entity_id'){const l=d.querySelector('.lbl');if(l){l.textContent=b.type=='slider'?(b.label?b.label+'  ':'')+'50%':(b.label||b.entity_id||'');if(b.type!='slider'){l.style.fontSize=fitPx(l.textContent,b.w-12)*S+'px';wrapLbl(l,b)}l.classList.toggle('ent',!b.label&&b.type!='slider')}}
+ if(k=='label'||k=='entity_id'){if(b.type!='slider'){draw();return}const l=d.querySelector('.lbl');if(l){l.textContent=(b.label?b.label+'  ':'')+'50%';l.classList.remove('ent')}}
  if(k=='icon'){draw();return}
  if(b.type!='slider'&&b.type!='camera'){if(k=='entity_id')updateSliderBox(b)}
  if(k=='color'){draw();return}};
