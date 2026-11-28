@@ -40,12 +40,12 @@ small{color:#9aa}
   <label>Entity <small id="entnote"></small></label><input id="entity_id" list="ents" placeholder="light.bedside" autocomplete="off">
   <datalist id="ents"></datalist>
   <button id="reload">Reload entity list from Home Assistant</button>
-  <label>Size and position, in grid cells (1 cell = 20 px)</label>
+  <label>Size and position, in grid cells (1 cell = 20 px; steps of a quarter cell)</label>
   <div id="cells" style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
-   <span><small>Width</small><input id="cw" type="number" min="2" step="1"></span>
-   <span><small>Height</small><input id="ch" type="number" min="2" step="1"></span>
-   <span><small>Column</small><input id="cx" type="number" min="0" step="1"></span>
-   <span><small>Row</small><input id="cy" type="number" min="0" step="1"></span>
+   <span><small>Width</small><input id="cw" type="number" min="2" step="0.25"></span>
+   <span><small>Height</small><input id="ch" type="number" min="2" step="0.25"></span>
+   <span><small>Column</small><input id="cx" type="number" min="0" step="0.25"></span>
+   <span><small>Row</small><input id="cy" type="number" min="0" step="0.25"></span>
   </div>
   <div id="sizeinfo"><small></small></div>
   <div id="btnprops">
@@ -55,7 +55,7 @@ small{color:#9aa}
    <small id="slnote"></small></div>
   </div>
   <div id="camprops" style="display:none">
-   <label>IP camera URL <small>(or pick a Home Assistant camera entity above)</small></label>
+   <label>IP camera URL <small>(leave empty if you pick a Home Assistant camera in the Entity box above)</small></label>
    <input id="url" placeholder="http://user:pass@192.168.1.50/mjpeg" autocomplete="off">
    <label><input id="fullbright" type="checkbox" style="width:auto"> Force full screen brightness while the camera is open</label>
    <small>Tapping the button opens the camera full screen; tap or swipe to close. Needs an MJPEG or JPEG snapshot URL. RTSP is not supported.</small>
@@ -77,7 +77,8 @@ const $=id=>document.getElementById(id);
 fetch('/api/version').then(r=>r.text()).then(v=>$('ver').textContent='v'+v);
 let S=1.5,W=480,H=280;const G=20,SMAX=1.5;  // G = grid cell in screen pixels
 let orient='landscape';
-const cells=v=>Math.round(v/G*10)/10;
+const Q=G/4;  // moving and resizing snap to a quarter of a grid cell (5 px)
+const cells=v=>Math.round(v/G*100)/100;
 const ICONS=['','power','eye','home','play','pause','bell','settings','ok','wifi','audio','charge','image','video'];
 const ACTIONS=[['toggle','Toggle'],['on','Turn on'],['off','Turn off'],['scene','Activate scene'],['script','Run script'],['press','Press button'],['open','Cover: open'],['close','Cover: close'],['stop','Cover: stop'],['lock','Lock'],['unlock','Unlock'],['play_pause','Media: play/pause']];
 let L={pages:[]},pi=0,sel=null;
@@ -129,7 +130,7 @@ function markSel(){[...$('canvas').children].forEach((d,i)=>d.classList.toggle('
 function drag(e,b,mode){
  e.preventDefault();const sx=e.clientX,sy=e.clientY,ox=b.x,oy=b.y,ow=b.w,oh=b.h,el=e.currentTarget.classList.contains('h')?e.currentTarget.parentNode:e.currentTarget;
  const bs=L.pages[pi].buttons,lk=mode=='move'?bs.map((x,i)=>x.linked===b.id?i:-1).filter(i=>i>=0):[],lo=lk.map(i=>[bs[i].x,bs[i].y]);
- const mv=ev=>{const dx=Math.round((ev.clientX-sx)/S/G)*G,dy=Math.round((ev.clientY-sy)/S/G)*G;
+ const mv=ev=>{const dx=Math.round((ev.clientX-sx)/S/Q)*Q,dy=Math.round((ev.clientY-sy)/S/Q)*Q;
   if(mode=='move'){b.x=Math.max(0,Math.min(W-b.w,ox+dx));b.y=Math.max(0,Math.min(H-b.h,oy+dy))}
   else{b.w=Math.max(2*G,Math.min(W-b.x,ow+dx));b.h=Math.max(2*G,Math.min(H-b.y,oh+dy))}
   el.style.left=b.x*S+'px';el.style.top=b.y*S+'px';el.style.width=b.w*S+'px';el.style.height=b.h*S+'px';cellInfo(b);lk.forEach((i,n)=>{const t=bs[i];t.x=Math.max(0,Math.min(W-t.w,lo[n][0]+b.x-ox));t.y=Math.max(0,Math.min(H-t.h,lo[n][1]+b.y-oy));const e=$('canvas').children[i];e.style.left=t.x*S+'px';e.style.top=t.y*S+'px'})};
@@ -143,7 +144,7 @@ function cellInfo(b){
 }
 function applyCells(){
  const b=L.pages[pi].buttons[sel];if(!b)return;
- const v=id=>Math.round(+$(id).value*G);
+ const v=id=>Math.round(+$(id).value*G/Q)*Q;
  b.w=Math.max(2*G,Math.min(W,v('cw')));b.h=Math.max(2*G,Math.min(H,v('ch')));
  b.x=Math.max(0,Math.min(W-b.w,v('cx')));b.y=Math.max(0,Math.min(H-b.h,v('cy')));
  const el=$('canvas').children[sel];

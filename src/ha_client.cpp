@@ -27,7 +27,7 @@ static bool hasExternal() { return !cfg.haExtHost.isEmpty(); }
 static std::vector<std::pair<String, String>> entityCache;
 static bool loadingEntities = false;
 static const char* PICK_DOMAINS[] = {"light", "switch", "cover", "fan", "climate", "media_player", "scene", "script",
-                                     "input_boolean", "input_number", "number", "lock", "button", "input_button"};
+                                     "input_boolean", "input_number", "number", "lock", "button", "input_button", "camera"};
 static constexpr int PICK_CHUNK = 100;  // entities per request: keeps each reply well under the 15 KB WebSocket limit
 static int pickDomain = 0, pickOffset = 0;
 static uint32_t tplId = 0;
