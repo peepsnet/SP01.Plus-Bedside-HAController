@@ -32,9 +32,11 @@ void haCallSlider(const String& entityId, const String& attr, float value);
 bool haConnected();
 void haReconnect();  // after settings change
 
-// Entity picker data (id + friendly name), loaded from HA after connecting.
-const std::vector<std::pair<String, String>>& haEntities();
+// Entity picker data (id + friendly name). Loaded from HA the first time the web editor asks for it (haEnsureEntities) or on
+// haRefreshEntities, and kept in PSRAM. haEntitiesNext walks the list: start with cursor = 0.
+bool haEntitiesNext(size_t& cursor, String& id, String& name);
 bool haEntitiesLoading();
+void haEnsureEntities();
 void haRefreshEntities();
 enum HaState { HA_NOT_CONFIGURED, HA_CONNECTING, HA_LOCAL, HA_EXTERNAL, HA_AUTH_ERROR };
 HaState haState();

@@ -141,6 +141,13 @@ Button labels shrink to fit: the device (and the preview) uses the largest of 18
 
 Coordinates are pixels in a 480x280 area (the bottom 40 px is the page tab/status bar). Button actions: `toggle`, `on`, `off`, `scene`, `script`, `press`, `open`, `close`, `stop`, `lock`, `unlock`, `play_pause`. Sliders use `"type":"slider"` with optional `attr` (`brightness` or `color_temp` for lights), `min` and `max`. Icons: `power, eye, home, play, pause, bell, settings, ok, wifi, audio, charge, image, video, fan` (LVGL built-in symbols; `fan` is a ceiling fan drawn from a small bitmap in `src/fan_icon.h`).
 
+## Stability notes and the serial log
+
+- The entity picker list is loaded from Home Assistant only when the web editor asks for it, kept in PSRAM (not the small internal heap) and sent to the browser in pieces. A big Home Assistant with thousands of sensors used to fill the internal heap, after which LVGL's failed allocation froze the whole device (touch, web UI and the Home Assistant link all stopped while the Wi-Fi icon still showed connected). A failed LVGL allocation now reboots the device instead of freezing it.
+- Each layout save used to add another Home Assistant state subscription without removing the old one; now the old one is replaced.
+- A failed connect attempt to Home Assistant blocks the main loop (touch, web) for up to 1.5 s (it was 5 s); the retry interval is 5 s. Moving Home Assistant to its own task would remove that stall completely and is not done yet.
+- Every 30 s the serial port (115200 baud, USB) prints a line like `[mem] up=120s heap free=... min=... maxblk=... psram free=... ha=2 wifi=3`. `min` (lowest free internal heap since boot) and `maxblk` (largest block still allocatable) falling toward a few KB means memory trouble. Attach this output when reporting a problem.
+
 ## Layout of the code
 
 | File | Purpose |
