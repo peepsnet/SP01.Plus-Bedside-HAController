@@ -114,7 +114,7 @@ Add a **camera button** in the layout editor (`type: "camera"`). Give it either 
 
 Sizes and positions are shown and editable in **grid cells** (1 cell = 20 px, so the usable area is 24 x 14 cells): width, height, column and row, next to drag and resize, which snap to a quarter of a cell (5 px). `layout.json` still stores pixels, so existing layouts keep working; a button that is not a whole number of cells shows a fraction such as 7.5 x 4.5.
 
-The editor preview is the device screen area scaled to fit the browser: one grid cell is always the same size for the grid and every element, at any browser width, and elements are clipped to (and on load moved inside) the screen area. Device and editor both use the same pixel coordinates (origin at the top left of the 480 x 280 canvas).
+The editor preview draws each button with its icon and the device text sizes (icon 24 px, label 18 px, slider caption 14 px, 12 px slider track with knob, all scaled with the preview), so it looks like the screen apart from the font (the device uses Montserrat, the preview uses it only if installed) and the icon shapes (look-alikes of the built-in LVGL symbols). It is the device screen area scaled to fit the browser: one grid cell is always the same size for the grid and every element, at any browser width, and elements are clipped to (and on load moved inside) the screen area. Device and editor both use the same pixel coordinates (origin at the top left of the 480 x 280 canvas).
 
 ## layout.json
 
