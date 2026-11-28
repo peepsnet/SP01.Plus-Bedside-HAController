@@ -62,9 +62,17 @@ small{color:#9aa}
    <small>Tapping the button opens the camera full screen; tap or swipe to close. Needs an MJPEG or JPEG snapshot URL. RTSP is not supported.</small>
   </div>
   <div id="thprops" style="display:none">
-   <label>Step per tap <small>(blank = the thermostat's own step, else 0.5)</small></label><input id="step" type="number" step="0.1" min="0.1">
-   <label>Unit <small>(blank = degree sign)</small></label><input id="tunit" placeholder="&deg;C" autocomplete="off">
-   <label>Lowest / highest set point <small>(blank = from the thermostat)</small></label>
+   <label>Typical settings <small>(fills in unit, limits and step; you can still change them)</small></label>
+   <select id="tpreset"><option value="">Choose...</option>
+    <option value="F1">Fahrenheit, home: 60 to 85, step 1</option>
+    <option value="F2">Fahrenheit, wide: 50 to 90, step 1</option>
+    <option value="F3">Fahrenheit, half degrees: 60 to 85, step 0.5</option>
+    <option value="C1">Celsius, home: 16 to 28, step 0.5</option>
+    <option value="C2">Celsius, wide: 10 to 30, step 0.5</option>
+    <option value="D">Clear (use the thermostat's own limits)</option></select>
+   <label>Step per tap <small id="stepnote">(blank = the thermostat's own step, else 0.5; 1 for Fahrenheit)</small></label><input id="step" type="number" step="0.1" min="0.1">
+   <label>Unit <small>(blank = degree sign; write &deg;F for Fahrenheit)</small></label><input id="tunit" placeholder="&deg;F or &deg;C" autocomplete="off">
+   <label>Lowest / highest set point <small id="limnote">(blank = from the thermostat)</small></label>
    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px"><input id="tmin" type="number" placeholder="min"><input id="tmax" type="number" placeholder="max"></div>
    <small>Shows the current temperature and the set point of a climate entity. Tap - and + to change the set point; it is sent when you stop tapping. Tile text and buttons scale to the tile size.</small>
   </div>
@@ -76,6 +84,8 @@ small{color:#9aa}
    <label>Attribute of that entity <small>(blank = its state)</small></label><input id="sub_attr" autocomplete="off">
    <label>Unit <small>(blank = the unit Home Assistant reports)</small></label><input id="vunit" placeholder="%" autocomplete="off">
    <label>Decimals <small>(blank = automatic)</small></label><input id="decimals" type="number" min="0" max="3">
+   <label>When tapped</label><select id="vaction"></select>
+   <label>Send the action to <small>(blank = this tile's entity)</small></label><input id="action_entity" list="ents" placeholder="light.bedside" autocomplete="off">
    <label><input id="bar" type="checkbox" style="width:auto"> Show a level bar</label>
    <label>Bar empty / full at <small>(blank = 0 / 100)</small></label>
    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px"><input id="vmin" type="number" placeholder="0"><input id="vmax" type="number" placeholder="100"></div>
@@ -105,6 +115,7 @@ const ACTIONS=[['toggle','Toggle'],['on','Turn on'],['off','Turn off'],['scene',
 let L={pages:[]},pi=0,sel=null;
 ICONS.forEach(i=>$('icon').add(new Option(i||'(none)',i)));
 ACTIONS.forEach(a=>$('action').add(new Option(a[1],a[0])));
+[['','Nothing'],...ACTIONS,['camera','Open camera view (entity must be a camera)']].forEach(a=>$('vaction').add(new Option(a[1],a[0])));
 // The preview is the device screen area (W x H px) scaled by S, so one grid cell is always G*S px and every element
 // uses the same scale. S shrinks on narrow browsers so the whole area fits without scrolling.
 function fit(){
@@ -195,7 +206,8 @@ function drawValue(d,b){
 }
 function drawThermo(d,b){
  d.style.background='#23272b';d.style.justifyContent='flex-start';
- const u=b.unit!==undefined?b.unit:'°',cur='21.5'+u,set='22'+u,status='Heating';
+ const u=b.unit!==undefined?b.unit:'°',F=isF(u),lo=b.min!==undefined?b.min:(F?50:7),hi=b.max!==undefined?b.max:(F?90:35),
+  curV=Math.max(lo,Math.min(hi,F?70:21.5)),setV=Math.max(lo,Math.min(hi,F?72:22)),cur=curV+u,set=setV+u,status='Heating';
  const ctrlH=Math.max(24,Math.min(40,Math.floor(b.h*36/100))),cbw=Math.max(28,Math.min(48,Math.floor(b.w*22/100))),topH=b.h-ctrlH-8,top=topH>=30;
  const ab=(css,txt,idx,extra)=>{const t=tspan(d,txt,idx,'position:absolute;text-align:center;'+css+(extra||''));return t};
  const wide=`left:${6*S}px;width:${(b.w-12)*S}px;`;
@@ -304,7 +316,7 @@ function mergeLinked(l){l.pages.forEach(p=>{const bs=p.buttons;
 function showProps(){
  const b=sel!=null?L.pages[pi].buttons[sel]:null;$('props').style.display=b?'block':'none';if(!b)return;
  const sl=b.type=='slider',cam=b.type=='camera',th=b.type=='thermostat',val=b.type=='value';$('btnprops').style.display=(sl||th||val)?'none':'block';$('thprops').style.display=th?'block':'none';$('valprops').style.display=val?'block':'none';
- for(const [id,key] of EXTRA)$(id).value=b[key]!==undefined?b[key]:'';if(val)$('bar').checked=!!b.bar;$('slprops').style.display=sl?'block':'none';
+ for(const [id,key] of EXTRA)$(id).value=b[key]!==undefined?b[key]:'';if(val)$('bar').checked=!!b.bar;if(th)thermoNotes(b);$('slprops').style.display=sl?'block':'none';
  $('camprops').style.display=cam?'block':'none';if(cam)$('fullbright').checked=!!b.full_brightness;$('actwrap').style.display=cam?'none':'block';$('slwrap').style.display=cam?'none':'block';
  for(const k of FIELDS)$(k).value=b[k]!==undefined?b[k]:(k=='color'?'#4A90E2':'');
  cellInfo(b);
@@ -319,9 +331,19 @@ for(const k of FIELDS)$(k).oninput=()=>{
  if(b.type=='button'){if(k=='entity_id')updateSliderBox(b)}
  if(k=='color'){draw();return}};
 // Fields of the thermostat and value tiles: [input id, layout key]. Blank removes the key (the default applies).
-const EXTRA=[['step','step'],['tunit','unit'],['tmin','min'],['tmax','max'],['vattr','attr'],['subtitle','subtitle'],['sub_entity','sub_entity'],['sub_attr','sub_attr'],['vunit','unit'],['decimals','decimals'],['vmin','min'],['vmax','max']];
+const EXTRA=[['step','step'],['tunit','unit'],['tmin','min'],['tmax','max'],['vattr','attr'],['subtitle','subtitle'],['sub_entity','sub_entity'],['sub_attr','sub_attr'],['vunit','unit'],['decimals','decimals'],['vmin','min'],['vmax','max'],['vaction','action'],['action_entity','action_entity']];
 for(const [id,key] of EXTRA)$(id).oninput=()=>{const b=L.pages[pi].buttons[sel];if(!b)return;const v=$(id).value;
  if(v==='')delete b[key];else b[key]=$(id).type=='number'?+v:v;draw()};
+// Typical thermostat settings: [unit, min, max, step]. US thermostats use Fahrenheit in whole degrees (about 50 to 90).
+const TPRESET={F1:['°F',60,85,1],F2:['°F',50,90,1],F3:['°F',60,85,0.5],C1:['°C',16,28,0.5],C2:['°C',10,30,0.5]};
+const isF=u=>/f/i.test(u||'');
+$('tpreset').onchange=()=>{const b=L.pages[pi].buttons[sel];if(!b)return;const k=$('tpreset').value,t=TPRESET[k];
+ if(t){b.unit=t[0];b.min=t[1];b.max=t[2];b.step=t[3]}else if(k=='D'){delete b.unit;delete b.min;delete b.max;delete b.step}
+ $('tpreset').value='';showProps();draw()};
+function thermoNotes(b){const f=isF(b.unit);
+ $('stepnote').textContent=f?'(blank = the thermostat\'s own step, else 1 for Fahrenheit)':'(blank = the thermostat\'s own step, else 0.5)';
+ $('limnote').textContent=f?'(blank = from the thermostat, else 50 to 90)':'(blank = from the thermostat, else 7 to 35)';
+ $('tmin').placeholder=f?'50':'7';$('tmax').placeholder=f?'90':'35';$('step').placeholder=f?'1':'0.5'}
 $('bar').onchange=()=>{const b=L.pages[pi].buttons[sel];if(!b)return;if($('bar').checked)b.bar=true;else delete b.bar;draw()};
 $('addth').onclick=()=>addW({type:'thermostat',label:'Thermostat',x:20,y:20,w:160,h:100,color:'#4A90E2'});
 $('addval').onclick=()=>addW({type:'value',label:'Title',x:20,y:20,w:140,h:80,color:'#4CAF50'});

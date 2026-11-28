@@ -29,6 +29,7 @@ struct Widget {
   bool thermo = false;      // thermostat tile: current temperature, set point and - / + buttons
   bool value = false;       // value tile: title, value (state or attribute), subtitle, optional level bar
   String entity, action, attr, label, url;
+  String actionEntity;      // value tile: entity the tap action is sent to (default: the tile's own entity)
   String subEntity, subAttr, subText, uText;  // value tile: subtitle source; thermostat/value: unit override
   bool hasU = false;        // "unit" is set in the layout (may be empty) and replaces the one HA reports
   int decimals = -1;        // value tile: digits after the point, -1 = automatic
@@ -540,9 +541,12 @@ static void thermoTap(lv_event_t* e) {
   float v;
   auto a = it->second.attrs.find("target_temp_step");
   if (step <= 0 && a != it->second.attrs.end() && parseNum(a->second, v)) step = v;
-  if (step <= 0) step = 0.5f;
+  const bool fahr = w->hasU && (w->uText.indexOf("F") >= 0 || w->uText.indexOf("f") >= 0);
+  if (step <= 0) step = fahr ? 1.0f : 0.5f;
   if (isnan(lo) && (a = it->second.attrs.find("min_temp")) != it->second.attrs.end() && parseNum(a->second, v)) lo = v;
   if (isnan(hi) && (a = it->second.attrs.find("max_temp")) != it->second.attrs.end() && parseNum(a->second, v)) hi = v;
+  if (isnan(lo)) lo = fahr ? 50.0f : 7.0f;  // typical limits when the thermostat reports none
+  if (isnan(hi)) hi = fahr ? 90.0f : 35.0f;
   float t = roundf((base + dir * step) / step) * step;
   if (!isnan(lo) && t < lo) t = lo;
   if (!isnan(hi) && t > hi) t = hi;
@@ -795,6 +799,17 @@ static void buildValue(Widget& w, lv_obj_t* page, lv_color_t c, JsonObject b, in
     lv_obj_set_style_bg_opa(w.lBar, LV_OPA_COVER, LV_PART_INDICATOR);
   }
   lv_label_set_text(w.lVal, "--");
+  if (w.action.length() && (w.actionEntity.length() || w.entity.length())) {  // optional tap action, same options as a button
+    lv_obj_add_flag(card, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_style_bg_color(card, lv_color_lighten(lv_color_darken(c, 180), 40), LV_STATE_PRESSED);
+    lv_obj_add_event_cb(card, [](lv_event_t* e) {
+      if (recentlySwiped()) return;
+      auto* cx = (Widget*)lv_event_get_user_data(e);
+      const String& target = cx->actionEntity.length() ? cx->actionEntity : cx->entity;
+      if (cx->action == "camera") cameraOpen(cx->label, target, "", false);
+      else if (pressHandler) pressHandler(target, cx->action);
+    }, LV_EVENT_CLICKED, &w);
+  }
 }
 
 // Thermostat tile: dark card with title and status on top, the current temperature, and a row [ - ] Set 22 [ + ].
@@ -936,12 +951,14 @@ bool uiBuild(const String& layoutJson) {
       auto w = std::unique_ptr<Widget>(new Widget());
       w->entity = String(b["entity_id"] | "");
       w->action = String(b["action"] | "toggle");
+      w->actionEntity = String(b["action_entity"] | "");
       w->label = String(b["label"] | "");
       String type = b["type"] | "button";
       w->slider = type == "slider";
       w->camera = type == "camera";
       w->thermo = type == "thermostat";
       w->value = type == "value";
+      if (w->thermo || w->value) w->action = String(b["action"] | "");  // tiles do nothing on a tap unless an action is chosen
       w->attr = String(b["attr"] | "");
       w->subEntity = String(b["sub_entity"] | "");
       w->subAttr = String(b["sub_attr"] | "");
