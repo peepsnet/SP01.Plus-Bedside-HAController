@@ -95,7 +95,7 @@ void setup() {
   uiInit([](const String& entity, const String& action) { haCallAction(entity, action); },
          [](const String& entity, const String& attr, float v) { haCallSlider(entity, attr, v); });
   menuInit();
-  if (!uiBuild(layoutRead())) uiBuild(DEFAULT_LAYOUT);
+  if (!uiBuild(layoutRead(cfgPortrait()))) uiBuild(DEFAULT_LAYOUT);
 
   startWifi();
   improvBegin();

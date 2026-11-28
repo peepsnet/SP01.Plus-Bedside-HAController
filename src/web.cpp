@@ -1,5 +1,6 @@
 #include "web.h"
 #include "config.h"
+#include "ota.h"
 #include "web_pages.h"
 #include <ArduinoJson.h>
 #include <Update.h>
@@ -11,6 +12,9 @@
 static WebServer server(80);
 static std::function<bool(const String&)> layoutCb;
 static bool updateOk = false;
+static String updateErr;
+static size_t updateWritten = 0;
+static int updateTotal = 0;
 
 // HTTP basic auth (user "admin"). Credentials are sent unencrypted over plain HTTP: LAN use only.
 static bool authed() {
@@ -26,15 +30,25 @@ void webBegin(std::function<bool(const String&)> onLayout) {
   server.on("/", HTTP_GET, [] { AUTH(); server.send_P(200, "text/html", EDITOR_HTML); });
   server.on("/settings", HTTP_GET, [] { AUTH(); server.send_P(200, "text/html", SETTINGS_HTML); });
 
-  server.on("/api/layout", HTTP_GET, [] { AUTH(); server.send(200, "application/json", layoutRead()); });
-  server.on("/api/layout", HTTP_POST, [] {
+  // ?o=landscape|portrait picks which layout; without it, the one for the current screen rotation.
+  auto wantPortrait = [] { return server.hasArg("o") ? server.arg("o") == "portrait" : cfgPortrait(); };
+  server.on("/api/layout", HTTP_GET, [wantPortrait] { AUTH(); server.send(200, "application/json", layoutRead(wantPortrait())); });
+  server.on("/api/layout", HTTP_POST, [wantPortrait] {
     AUTH();
     String body = server.arg("plain");
-    if (!layoutCb || !layoutCb(body)) {  // callback validates + rebuilds the UI
+    bool portrait = wantPortrait();
+    bool ok;
+    if (portrait == cfgPortrait()) {
+      ok = layoutCb && layoutCb(body);  // callback validates + rebuilds the UI
+    } else {  // editing the other orientation: only check it, it shows up after a rotation
+      JsonDocument chk;
+      ok = !deserializeJson(chk, body) && chk["pages"].is<JsonArray>();
+    }
+    if (!ok) {
       server.send(400, "text/plain", "invalid layout");
       return;
     }
-    layoutWrite(body);
+    layoutWrite(body, portrait);
     server.send(200, "text/plain", "ok");
   });
 
@@ -50,6 +64,7 @@ void webBegin(std::function<bool(const String&)> onLayout) {
     d["ha_ext_tls"] = cfg.haExtTls;
     d["bright_min"] = cfg.brightMinPct;
     d["bright_max"] = cfg.brightMaxPct;
+    d["rotation"] = cfg.rotation;
     d["version"] = FW_VERSION;
     String out;
     serializeJson(d, out);
@@ -72,6 +87,7 @@ void webBegin(std::function<bool(const String&)> onLayout) {
     cfg.haExtTls = d["ha_ext_tls"] | cfg.haExtTls;
     cfg.brightMinPct = d["bright_min"] | cfg.brightMinPct;
     cfg.brightMaxPct = d["bright_max"] | cfg.brightMaxPct;
+    cfg.rotation = constrain((int)(d["rotation"] | cfg.rotation), 0, 3);
     configClampBrightness();  // enforce sane limits server-side as well
     String tok = d["ha_token"] | "";
     if (tok.length()) cfg.haToken = tok;
@@ -183,21 +199,49 @@ void webBegin(std::function<bool(const String&)> onLayout) {
   server.on("/update", HTTP_POST,
     [] {
       if (!authed()) return;
-      server.send(updateOk ? 200 : 500, "text/plain", updateOk ? "ok, rebooting" : Update.errorString());
-      if (updateOk) { delay(500); ESP.restart(); }
+      server.send(updateOk ? 200 : 500, "text/plain", updateOk ? "ok, rebooting" : (updateErr.length() ? updateErr : Update.errorString()));
+      if (updateOk) {
+        otaReport("Rebooting", 100);
+        delay(800);
+        ESP.restart();
+      }
     },
     [] {
       if (!server.authenticate("admin", cfg.adminPass.c_str())) return;
       HTTPUpload& u = server.upload();
       if (u.status == UPLOAD_FILE_START) {
         updateOk = false;
-        Update.begin(UPDATE_SIZE_UNKNOWN);
+        updateErr = "";
+        updateWritten = 0;
+        updateTotal = server.clientContentLength();  // includes a little multipart overhead
+        otaReport("Receiving and writing", 0);
+        if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
+          updateErr = Update.errorString();
+          otaFail(updateErr);
+        }
       } else if (u.status == UPLOAD_FILE_WRITE) {
-        Update.write(u.buf, u.currentSize);
+        if (updateErr.length()) return;
+        if (Update.write(u.buf, u.currentSize) != u.currentSize) {
+          updateErr = Update.errorString();
+          Update.abort();
+          otaFail(updateErr);
+          return;
+        }
+        updateWritten += u.currentSize;
+        int pct = updateTotal > 0 ? (int)((uint64_t)updateWritten * 100 / updateTotal) : -1;
+        otaReport("Receiving and writing", pct > 99 ? 99 : pct);
       } else if (u.status == UPLOAD_FILE_END) {
+        if (updateErr.length()) return;
+        otaReport("Verifying", 100);
         updateOk = Update.end(true);
+        if (!updateOk) {
+          updateErr = Update.errorString();
+          otaFail(updateErr);
+        }
       } else if (u.status == UPLOAD_FILE_ABORTED) {
         Update.abort();
+        updateErr = "Upload interrupted";
+        otaFail(updateErr);
       }
     });
   server.begin();

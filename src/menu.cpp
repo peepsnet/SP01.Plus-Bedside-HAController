@@ -14,6 +14,8 @@ static lv_obj_t* scrScan;
 static lv_obj_t* scrNet;
 static lv_obj_t* scrPass;
 static lv_obj_t* scrAbout;
+static lv_obj_t* scrDisplay;
+static lv_obj_t* rotBtns[4];
 static lv_obj_t* wifiInfo;
 static lv_obj_t* wifiList;
 static lv_obj_t* netTitle;
@@ -39,8 +41,11 @@ static int netCount = 0;
 
 static const lv_color_t WHITE = lv_color_hex(0xFFFFFF);
 
+// The layout below is designed for 480 px wide. On a portrait screen (320 wide) x positions and widths shrink by 2/3.
+static int SX(int v) { return uiPortrait() ? v * 2 / 3 : v; }
+
 static void showScreen(lv_obj_t* s) {
-  lv_obj_t* all[] = {scrMain, scrWifi, scrNet, scrScan, scrPass, scrAbout};
+  lv_obj_t* all[] = {scrMain, scrWifi, scrNet, scrScan, scrPass, scrAbout, scrDisplay};
   for (auto* o : all) lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
   lv_obj_remove_flag(s, LV_OBJ_FLAG_HIDDEN);
 }
@@ -53,7 +58,7 @@ static void say(lv_obj_t* label, const String& s) {
 static lv_obj_t* mkScreen() {
   lv_obj_t* s = lv_obj_create(panel);
   lv_obj_remove_style_all(s);
-  lv_obj_set_size(s, 480, 320);
+  lv_obj_set_size(s, uiW(), uiH());
   lv_obj_remove_flag(s, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_add_flag(s, LV_OBJ_FLAG_HIDDEN);
   return s;
@@ -70,8 +75,8 @@ static lv_obj_t* mkTitle(lv_obj_t* parent, const char* text) {
 
 static lv_obj_t* mkLabel(lv_obj_t* parent, int x, int y, int w, const lv_font_t* font, lv_color_t color) {
   lv_obj_t* l = lv_label_create(parent);
-  lv_obj_set_pos(l, x, y);
-  lv_obj_set_width(l, w);
+  lv_obj_set_pos(l, SX(x), y);
+  lv_obj_set_width(l, SX(w));
   lv_obj_set_style_text_font(l, font, 0);
   lv_obj_set_style_text_color(l, color, 0);
   lv_label_set_text(l, "");
@@ -79,17 +84,17 @@ static lv_obj_t* mkLabel(lv_obj_t* parent, int x, int y, int w, const lv_font_t*
 }
 
 static lv_obj_t* mkBtn(lv_obj_t* parent, const char* txt, lv_event_cb_t cb, int x, int y, int w, int h = 44,
-                       uint32_t color = 0x1976D2) {
+                       uint32_t color = 0x1976D2, void* ud = nullptr) {
   lv_obj_t* b = lv_button_create(parent);
-  lv_obj_set_size(b, w, h);
-  lv_obj_set_pos(b, x, y);
+  lv_obj_set_size(b, SX(w), h);
+  lv_obj_set_pos(b, SX(x), y);
   lv_obj_set_style_bg_color(b, lv_color_hex(color), 0);
   lv_obj_t* l = lv_label_create(b);
-  lv_obj_set_style_text_font(l, &lv_font_montserrat_18, 0);
+  lv_obj_set_style_text_font(l, SX(w) < 150 && uiPortrait() ? &lv_font_montserrat_14 : &lv_font_montserrat_18, 0);
   lv_obj_set_style_text_color(l, WHITE, 0);
   lv_label_set_text(l, txt);
   lv_obj_center(l);
-  lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, nullptr);
+  lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, ud);
   return b;
 }
 
@@ -204,6 +209,11 @@ void menuConnect(const String& ssid, const String& pass, lv_obj_t* msg) {
   say(msg, "Could not connect. Check the password and try again.");
 }
 
+static void refreshDisplay() {
+  for (int i = 0; i < 4; i++)  // the active rotation is shown green
+    lv_obj_set_style_bg_color(rotBtns[i], lv_color_hex(i == cfg.rotation ? 0x2E7D32 : 0x1976D2), 0);
+}
+
 // --- About screen -----------------------------------------------------------------------------
 static void refreshAbout() {
   String t = String("Firmware: v") + FW_VERSION + "\nIP: " + ipText() + "\nWeb UI: http://" + cfg.hostname +
@@ -233,7 +243,7 @@ void menuInit() {
   // Gear button, bottom right.
   lv_obj_t* gear = lv_button_create(scr);
   lv_obj_set_size(gear, 40, 32);
-  lv_obj_set_pos(gear, 436, 284);
+  lv_obj_align(gear, LV_ALIGN_BOTTOM_RIGHT, -4, -4);
   lv_obj_set_style_bg_color(gear, lv_color_hex(0x2B2F33), 0);
   lv_obj_t* gl = lv_label_create(gear);
   lv_label_set_text(gl, LV_SYMBOL_SETTINGS);
@@ -241,7 +251,7 @@ void menuInit() {
   lv_obj_add_event_cb(gear, [](lv_event_t*) { menuOpen(false); }, LV_EVENT_CLICKED, nullptr);
 
   panel = lv_obj_create(scr);
-  lv_obj_set_size(panel, 480, 320);
+  lv_obj_set_size(panel, uiW(), uiH());
   lv_obj_set_pos(panel, 0, 0);
   lv_obj_set_style_bg_color(panel, lv_color_hex(0x0B0E11), 0);
   lv_obj_set_style_bg_opa(panel, LV_OPA_COVER, 0);
@@ -258,9 +268,10 @@ void menuInit() {
   scrScan = mkScreen();
   scrPass = mkScreen();
   scrAbout = mkScreen();
+  scrDisplay = mkScreen();
 
   // Content is inset 14 px from the screen edge.
-  for (auto* s : {scrMain, scrWifi, scrNet, scrScan, scrAbout}) {
+  for (auto* s : {scrMain, scrWifi, scrNet, scrScan, scrAbout, scrDisplay}) {
     lv_obj_set_style_pad_all(s, 14, 0);
   }
 
@@ -273,6 +284,7 @@ void menuInit() {
     lv_obj_add_flag(installBtn, LV_OBJ_FLAG_HIDDEN);
     showScreen(scrAbout);
   }, 226, 60, 210, 90);
+  mkBtn(scrMain, LV_SYMBOL_IMAGE "  Display", [](lv_event_t*) { refreshDisplay(); showScreen(scrDisplay); }, 0, 158, 210, 70);
   mkBtn(scrMain, "Close", [](lv_event_t*) { lv_obj_add_flag(panel, LV_OBJ_FLAG_HIDDEN); }, 0, 244, 140, 44, 0x455A64);
 
   // ---- wifi ----
@@ -282,7 +294,7 @@ void menuInit() {
   lv_obj_t* hdr = mkLabel(scrWifi, 0, 70, 440, &lv_font_montserrat_14, lv_color_hex(0xFFD54F));
   lv_label_set_text(hdr, "Saved networks (highest priority first). Tap one to edit.");
   wifiList = lv_list_create(scrWifi);
-  lv_obj_set_size(wifiList, 452, 120);
+  lv_obj_set_size(wifiList, uiW() - 28, 120);
   lv_obj_set_pos(wifiList, 0, 90);
   lv_obj_set_style_bg_color(wifiList, lv_color_hex(0x11161B), 0);
   lv_obj_set_style_border_width(wifiList, 0, 0);
@@ -320,7 +332,7 @@ void menuInit() {
   mkTitle(scrScan, "Choose network");
   scanNote = mkLabel(scrScan, 0, 34, 300, &lv_font_montserrat_14, lv_color_hex(0xFFD54F));
   scanList = lv_list_create(scrScan);
-  lv_obj_set_size(scanList, 452, 170);
+  lv_obj_set_size(scanList, uiW() - 28, 170);
   lv_obj_set_pos(scanList, 0, 58);
   lv_obj_set_style_bg_color(scanList, lv_color_hex(0x11161B), 0);
   lv_obj_set_style_border_width(scanList, 0, 0);
@@ -332,13 +344,13 @@ void menuInit() {
   passTitle = mkTitle(scrPass, "Join network");
   lv_obj_set_pos(passTitle, 14, 2);
   ssidArea = lv_textarea_create(scrPass);
-  lv_obj_set_size(ssidArea, 452, 38);
+  lv_obj_set_size(ssidArea, uiW() - 28, 38);
   lv_obj_set_pos(ssidArea, 14, 34);
   lv_textarea_set_one_line(ssidArea, true);
   lv_textarea_set_placeholder_text(ssidArea, "Network name (SSID)");
   lv_obj_set_style_text_color(ssidArea, lv_color_hex(0x101214), 0);  // dark text on the light input box
   passArea = lv_textarea_create(scrPass);
-  lv_obj_set_size(passArea, 452, 38);
+  lv_obj_set_size(passArea, uiW() - 28, 38);
   lv_obj_set_pos(passArea, 14, 76);
   lv_textarea_set_one_line(passArea, true);
   lv_textarea_set_password_mode(passArea, true);
@@ -347,14 +359,14 @@ void menuInit() {
   passMsg = mkLabel(scrPass, 14, 154, 452, &lv_font_montserrat_14, lv_color_hex(0xFFD54F));
   lv_obj_set_pos(passMsg, 300, 124);
   lv_obj_set_width(passMsg, 176);
-  mkBtn(scrPass, "Cancel", [](lv_event_t*) {
+  lv_obj_t* bCancel = mkBtn(scrPass, "Cancel", [](lv_event_t*) {
     if (passMode == PM_EDIT) { refreshNetDetail(); showScreen(scrNet); }
     else { refreshWifi(); showScreen(scrWifi); }
   }, 14, 118, 84, 34, 0x455A64);
-  mkBtn(scrPass, "Show", [](lv_event_t*) {
+  lv_obj_t* bShow = mkBtn(scrPass, "Show", [](lv_event_t*) {
     lv_textarea_set_password_mode(passArea, !lv_textarea_get_password_mode(passArea));
   }, 104, 118, 70, 34, 0x455A64);
-  mkBtn(scrPass, "Save", [](lv_event_t*) {
+  lv_obj_t* bSave = mkBtn(scrPass, "Save", [](lv_event_t*) {
     String ssid = passMode == PM_MANUAL ? String(lv_textarea_get_text(ssidArea)) : chosenSsid;
     String pass = String(lv_textarea_get_text(passArea));
     ssid.trim();
@@ -364,14 +376,24 @@ void menuInit() {
     refreshWifi();
     showScreen(scrWifi);
   }, 180, 118, 56, 34, 0x2E7D32);
-  mkBtn(scrPass, "Connect", [](lv_event_t*) {
+  lv_obj_t* bConn = mkBtn(scrPass, "Connect", [](lv_event_t*) {
     String ssid = passMode == PM_MANUAL ? String(lv_textarea_get_text(ssidArea)) : chosenSsid;
     ssid.trim();
     if (ssid.isEmpty()) { lv_label_set_text(passMsg, "Enter a network name."); return; }
     menuConnect(ssid, String(lv_textarea_get_text(passArea)), passMsg);
   }, 242, 118, 52, 34, 0x1976D2);
+  if (uiPortrait()) {  // the four buttons do not fit in one narrow row at the scaled widths: re-place them by hand
+    int xs[4] = {14, 88, 152, 216}, ws[4] = {70, 60, 60, 90};
+    lv_obj_t* bs[4] = {bCancel, bShow, bSave, bConn};
+    for (int i = 0; i < 4; i++) {
+      lv_obj_set_pos(bs[i], xs[i], 118);
+      lv_obj_set_width(bs[i], ws[i]);
+    }
+    lv_obj_set_pos(passMsg, 14, 156);
+    lv_obj_set_width(passMsg, uiW() - 28);
+  }
   kb = lv_keyboard_create(scrPass);
-  lv_obj_set_size(kb, 480, 162);
+  lv_obj_set_size(kb, uiW(), 162);
   lv_obj_align(kb, LV_ALIGN_BOTTOM_MID, 0, 0);
   lv_keyboard_set_textarea(kb, passArea);
   // Tapping a text box sends the keyboard to it.
@@ -383,6 +405,25 @@ void menuInit() {
     ssid.trim();
     if (!ssid.isEmpty()) menuConnect(ssid, String(lv_textarea_get_text(passArea)), passMsg);
   }, LV_EVENT_READY, nullptr);
+
+  // ---- display (rotation) ----
+  mkTitle(scrDisplay, "Display");
+  lv_obj_t* rotNote = mkLabel(scrDisplay, 0, 34, 440, &lv_font_montserrat_14, lv_color_hex(0xFFD54F));
+  lv_label_set_text(rotNote, "Rotate the screen. The device restarts to apply it.\nPortrait uses its own layout (edit it on the web page).");
+  static const char* rotNames[4] = {"Landscape 0" "\xC2\xB0", "90" "\xC2\xB0" " clockwise", "180" "\xC2\xB0", "90" "\xC2\xB0" " counter-clockwise"};
+  for (int i = 0; i < 4; i++) {
+    int x = (i & 1) ? 226 : 0, y = 90 + (i >> 1) * 62;
+    rotBtns[i] = mkBtn(scrDisplay, rotNames[i], [](lv_event_t* e) {
+      int r = (int)(intptr_t)lv_event_get_user_data(e);
+      if (r == cfg.rotation) return;
+      cfg.rotation = r;
+      configSave();
+      uiProgress("Rotating screen", "Restarting...", -1);  // full-screen notice
+      delay(800);
+      ESP.restart();
+    }, x, y, 210, 54, 0x1976D2, (void*)(intptr_t)i);
+  }
+  mkBtn(scrDisplay, "Back", [](lv_event_t*) { showScreen(scrMain); }, 0, 244, 100, 44, 0x455A64);
 
   // ---- about ----
   mkTitle(scrAbout, "About");
@@ -399,9 +440,8 @@ void menuInit() {
     } else say(aboutMsg, "Up to date (" + tag + ").");
   }, 0, 244, 160);
   installBtn = mkBtn(scrAbout, "Install", [](lv_event_t*) {
-    say(aboutMsg, "Downloading and flashing... do not power off.");
-    String err = otaInstallLatest();  // reboots on success
-    say(aboutMsg, "Update failed: " + err);
+    String err = otaInstallLatest();  // shows progress full screen and reboots on success
+    otaFail(err);
   }, 168, 244, 100, 44, 0x2E7D32);
   lv_obj_add_flag(installBtn, LV_OBJ_FLAG_HIDDEN);
   mkBtn(scrAbout, "Back", [](lv_event_t*) { showScreen(scrMain); }, 276, 244, 100, 44, 0x455A64);

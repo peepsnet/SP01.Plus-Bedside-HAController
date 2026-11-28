@@ -1,6 +1,7 @@
 #include "ui.h"
 #include "display.h"
 #include "config.h"
+#include "camera.h"
 #include "menu.h"
 #include <ArduinoJson.h>
 #include <lvgl.h>
@@ -10,6 +11,11 @@
 #include <memory>
 
 static LGFX tft;
+static int scrW = 480, scrH = 320;  // 320x480 when the screen is rotated to portrait
+int uiW() { return scrW; }
+int uiH() { return scrH; }
+int uiCanvasH() { return scrH - 40; }
+bool uiPortrait() { return scrW < scrH; }
 static lv_display_t* disp;
 static uint8_t* drawBuf;
 static ButtonHandler pressHandler;
@@ -17,7 +23,9 @@ static ButtonHandler pressHandler;
 // One on-screen control (button or slider). Owned by `widgets`; LVGL events hold raw pointers into it.
 struct Widget {
   bool slider = false;
-  String entity, action, attr, label;
+  bool camera = false;  // button that opens the full-screen camera view
+  bool fullBright = false;  // camera: force full brightness while it is open
+  String entity, action, attr, label, url;
   float mul = 1;       // slider units per displayed unit (climate uses half degrees)
   const char* unit = "";
   lv_obj_t* obj = nullptr;
@@ -59,19 +67,20 @@ static uint32_t lastSwipeMs = 0;  // buttons ignore the click that a swipe would
 enum PendingSwipe { SW_NONE, SW_OPEN_BRIGHT, SW_CLOSE_BRIGHT, SW_NEXT, SW_PREV };
 static PendingSwipe pendingSwipe = SW_NONE;
 static bool brightOpen = false;
+static bool progShown = false;  // firmware update card is up
 static constexpr int TOP_ZONE = 44;      // swipe must start within this many pixels of the top edge
 static constexpr int SWIPE_MIN = 70;     // horizontal distance
 static constexpr int PULL_MIN = 50;      // vertical distance
 static inline bool recentlySwiped() { return millis() - lastSwipeMs < 500; }
 
 static void evalSwipe() {
-  if (sliderHeld || menuIsOpen()) return;
+  if (sliderHeld || menuIsOpen() || cameraIsOpen() || progShown) return;
   int dx = tx - tx0, dy = ty - ty0;
   if (brightOpen) {
     if (dy < -PULL_MIN && -dy > abs(dx)) pendingSwipe = SW_CLOSE_BRIGHT;
   } else if (ty0 < TOP_ZONE && dy > PULL_MIN && dy > abs(dx)) {
     pendingSwipe = SW_OPEN_BRIGHT;
-  } else if (abs(dx) > SWIPE_MIN && abs(dx) > abs(dy) * 2 && ty0 < UI_CANVAS_H) {
+  } else if (abs(dx) > SWIPE_MIN && abs(dx) > abs(dy) * 2 && ty0 < uiCanvasH()) {
     pendingSwipe = dx < 0 ? SW_NEXT : SW_PREV;
   }
   if (pendingSwipe != SW_NONE) lastSwipeMs = millis();
@@ -107,25 +116,33 @@ static lv_obj_t* haPillLabel;
 
 static void buildStatusIcons() {
   lv_obj_t* scr = lv_screen_active();
-  wifiIcon = lv_label_create(scr);
-  lv_obj_set_style_text_font(wifiIcon, &lv_font_montserrat_24, 0);
+  // Small icons in the bottom bar, left of the gear button, laid out in a row so they follow the screen width.
+  lv_obj_t* box = lv_obj_create(scr);
+  lv_obj_remove_style_all(box);
+  lv_obj_set_size(box, LV_SIZE_CONTENT, 24);
+  lv_obj_align(box, LV_ALIGN_BOTTOM_RIGHT, -54, -8);
+  lv_obj_set_flex_flow(box, LV_FLEX_FLOW_ROW);
+  lv_obj_set_flex_align(box, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+  lv_obj_set_style_pad_column(box, 8, 0);
+  lv_obj_remove_flag(box, LV_OBJ_FLAG_SCROLLABLE);
+
+  wifiIcon = lv_label_create(box);
+  lv_obj_set_style_text_font(wifiIcon, &lv_font_montserrat_18, 0);
   lv_label_set_text(wifiIcon, LV_SYMBOL_WIFI);
-  lv_obj_set_pos(wifiIcon, 338, 288);
   lv_obj_add_flag(wifiIcon, LV_OBJ_FLAG_CLICKABLE);  // tap the Wi-Fi icon to open the Wi-Fi settings
-  lv_obj_set_ext_click_area(wifiIcon, 10);
+  lv_obj_set_ext_click_area(wifiIcon, 12);
   lv_obj_add_event_cb(wifiIcon, [](lv_event_t*) { menuOpen(true); }, LV_EVENT_CLICKED, nullptr);
 
   // Outlined pill like a connection badge: colored border and text, transparent inside.
-  haPill = lv_obj_create(scr);
+  haPill = lv_obj_create(box);
   lv_obj_remove_style_all(haPill);
-  lv_obj_set_size(haPill, LV_SIZE_CONTENT, 28);
-  lv_obj_set_pos(haPill, 374, 286);
-  lv_obj_set_style_border_width(haPill, 2, 0);
-  lv_obj_set_style_radius(haPill, 8, 0);
-  lv_obj_set_style_pad_hor(haPill, 8, 0);
-  lv_obj_set_style_pad_ver(haPill, 2, 0);
+  lv_obj_set_size(haPill, LV_SIZE_CONTENT, 20);
+  lv_obj_set_style_border_width(haPill, 1, 0);
+  lv_obj_set_style_radius(haPill, 6, 0);
+  lv_obj_set_style_pad_hor(haPill, 6, 0);
+  lv_obj_set_style_pad_ver(haPill, 1, 0);
   haPillLabel = lv_label_create(haPill);
-  lv_obj_set_style_text_font(haPillLabel, &lv_font_montserrat_18, 0);
+  lv_obj_set_style_text_font(haPillLabel, &lv_font_montserrat_14, 0);
   lv_label_set_text(haPillLabel, "HA");
   uiSetWifiState(0, 0);
   uiSetHaState(HA_NOT_CONFIGURED);
@@ -173,6 +190,8 @@ void uiSetBrightnessPct(int pct, bool save) {
   if (save) configSave();
 }
 
+void uiSetFullBrightness(bool on) { tft.setBrightness(on ? 255 : (uint8_t)(cfg.brightnessPct * 255 / 100)); }
+
 static void showBrightness(bool open) {
   brightOpen = open;
   if (open) {
@@ -197,13 +216,13 @@ static void buildBrightnessPanel() {
   // Tapping outside the panel closes it.
   brightScrim = lv_obj_create(scr);
   lv_obj_remove_style_all(brightScrim);
-  lv_obj_set_size(brightScrim, 480, 320);
+  lv_obj_set_size(brightScrim, scrW, scrH);
   lv_obj_add_flag(brightScrim, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_add_event_cb(brightScrim, [](lv_event_t*) { showBrightness(false); }, LV_EVENT_CLICKED, nullptr);
   lv_obj_add_flag(brightScrim, LV_OBJ_FLAG_HIDDEN);
 
   brightPanel = lv_obj_create(scr);
-  lv_obj_set_size(brightPanel, 480, 110);
+  lv_obj_set_size(brightPanel, scrW, 110);
   lv_obj_set_pos(brightPanel, 0, 0);
   lv_obj_set_style_bg_color(brightPanel, lv_color_hex(0x0B0E11), 0);
   lv_obj_set_style_bg_opa(brightPanel, LV_OPA_COVER, 0);
@@ -219,7 +238,7 @@ static void buildBrightnessPanel() {
   lv_obj_align(brightLabel, LV_ALIGN_TOP_LEFT, 0, 0);
 
   brightSlider = lv_slider_create(brightPanel);
-  lv_obj_set_size(brightSlider, 420, 22);
+  lv_obj_set_size(brightSlider, scrW - 60, 22);
   lv_obj_align(brightSlider, LV_ALIGN_TOP_MID, 0, 52);
   lv_slider_set_range(brightSlider, cfg.brightMinPct, cfg.brightMaxPct);
   lv_obj_set_style_pad_all(brightSlider, 10, LV_PART_KNOB);
@@ -243,14 +262,18 @@ void uiInit(ButtonHandler onPress, SliderHandler onSlide) {
   pressHandler = onPress;
   slideHandler = onSlide;
   tft.init();
-  tft.setRotation(1);  // GUESS: landscape with USB port on the correct side; flip to 3 if upside down
+  // Base orientation is rotation 1 (landscape). cfg.rotation adds 0..3 clockwise quarter turns. The direction is a guess
+  // for this panel: if 90 and 270 come out swapped, change the + to a - below.
+  tft.setRotation((1 + cfg.rotation) & 3);
+  scrW = tft.width();
+  scrH = tft.height();
   tft.fillScreen(TFT_BLACK);
 
   lv_init();
   lv_tick_set_cb([]() -> uint32_t { return millis(); });
-  const size_t bufPx = 480 * 40;  // 40 lines, partial render
+  const size_t bufPx = scrW * 40;  // 40 lines, partial render
   drawBuf = (uint8_t*)heap_caps_malloc(bufPx * 2, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
-  disp = lv_display_create(480, 320);
+  disp = lv_display_create(scrW, scrH);
   lv_display_set_flush_cb(disp, flushCb);
   lv_display_set_buffers(disp, drawBuf, nullptr, bufPx * 2, LV_DISPLAY_RENDER_MODE_PARTIAL);
   lv_indev_t* in = lv_indev_create();
@@ -264,12 +287,12 @@ void uiInit(ButtonHandler onPress, SliderHandler onSlide) {
   lv_obj_remove_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
   canvasHolder = lv_obj_create(scr);
   lv_obj_remove_style_all(canvasHolder);
-  lv_obj_set_size(canvasHolder, UI_CANVAS_W, UI_CANVAS_H);
+  lv_obj_set_size(canvasHolder, scrW, uiCanvasH());
   lv_obj_set_pos(canvasHolder, 0, 0);
   barHolder = lv_obj_create(scr);
   lv_obj_remove_style_all(barHolder);
-  lv_obj_set_size(barHolder, 320, 40);
-  lv_obj_set_pos(barHolder, 0, UI_CANVAS_H);
+  lv_obj_set_size(barHolder, scrW - 150, 40);  // leaves room for the status icons and the gear
+  lv_obj_set_pos(barHolder, 0, uiCanvasH());
   lv_obj_set_flex_flow(barHolder, LV_FLEX_FLOW_ROW);
   lv_obj_set_flex_align(barHolder, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
   lv_obj_set_style_pad_all(barHolder, 4, 0);
@@ -307,6 +330,7 @@ static const char* iconSymbol(const String& n) {
   if (n == "audio") return LV_SYMBOL_AUDIO;
   if (n == "charge") return LV_SYMBOL_CHARGE;
   if (n == "image") return LV_SYMBOL_IMAGE;
+  if (n == "video") return LV_SYMBOL_VIDEO;
   return nullptr;
 }
 
@@ -373,7 +397,13 @@ static void buildButton(Widget& w, lv_obj_t* page, lv_color_t c, JsonObject b, i
   lv_obj_set_style_text_font(lb, &lv_font_montserrat_18, 0);
   lv_label_set_text(lb, w.label.c_str());
   w.text = lb;
-  if (w.entity.length()) {
+  if (w.camera) {
+    lv_obj_add_event_cb(btn, [](lv_event_t* e) {
+      if (recentlySwiped()) return;
+      auto* cx = (Widget*)lv_event_get_user_data(e);
+      cameraOpen(cx->label, cx->entity, cx->url, cx->fullBright);
+    }, LV_EVENT_CLICKED, &w);
+  } else if (w.entity.length()) {
     lv_obj_add_event_cb(btn, [](lv_event_t* e) {
       if (recentlySwiped()) return;  // this click only ended a swipe
       auto* cx = (Widget*)lv_event_get_user_data(e);
@@ -455,7 +485,7 @@ bool uiBuild(const String& layoutJson) {
   for (JsonObject p : pg) {
     lv_obj_t* page = lv_obj_create(canvasHolder);
     lv_obj_remove_style_all(page);
-    lv_obj_set_size(page, UI_CANVAS_W, UI_CANVAS_H);
+    lv_obj_set_size(page, scrW, uiCanvasH());
     lv_obj_remove_flag(page, LV_OBJ_FLAG_SCROLLABLE);
     pages.push_back(page);
     size_t pageIdx = pages.size() - 1;
@@ -482,6 +512,9 @@ bool uiBuild(const String& layoutJson) {
       w->label = String(b["label"] | "");
       String type = b["type"] | "button";
       w->slider = type == "slider";
+      w->camera = type == "camera";
+      w->url = String(b["url"] | "");
+      w->fullBright = b["full_brightness"] | false;
       const char* hex = b["color"] | "#4A90E2";
       lv_color_t c = lv_color_hex(strtoul(hex[0] == '#' ? hex + 1 : hex, nullptr, 16));
       int bx = b["x"] | 0, by = b["y"] | 0, bw = b["w"] | 100, bh = b["h"] | 70;
@@ -489,7 +522,7 @@ bool uiBuild(const String& layoutJson) {
       if (w->slider) buildSlider(*w, page, c, b, bx, by, bw, bh);
       else buildButton(*w, page, c, b, bx, by, bw, bh);
 
-      if (w->entity.length()) {
+      if (w->entity.length() && !w->camera) {  // a camera tile opens a stream, it has no state to follow
         if (std::find(entityList.begin(), entityList.end(), w->entity) == entityList.end())
           entityList.push_back(w->entity);
         byEntity[w->entity].push_back(w.get());
@@ -530,7 +563,7 @@ static lv_obj_t* bannerLabel;
 void uiSetBanner(const String& text) {
   if (!banner) {
     banner = lv_obj_create(lv_screen_active());
-    lv_obj_set_size(banner, 440, LV_SIZE_CONTENT);
+    lv_obj_set_size(banner, scrW - 40, LV_SIZE_CONTENT);
     lv_obj_align(banner, LV_ALIGN_TOP_MID, 0, 60);
     lv_obj_set_style_bg_color(banner, lv_color_hex(0x0B0E11), 0);
     lv_obj_set_style_bg_opa(banner, LV_OPA_COVER, 0);
@@ -540,7 +573,7 @@ void uiSetBanner(const String& text) {
     lv_obj_set_style_pad_all(banner, 14, 0);
     lv_obj_remove_flag(banner, LV_OBJ_FLAG_SCROLLABLE);
     bannerLabel = lv_label_create(banner);
-    lv_obj_set_width(bannerLabel, 410);
+    lv_obj_set_width(bannerLabel, scrW - 70);
     lv_obj_set_style_text_font(bannerLabel, &lv_font_montserrat_24, 0);
     lv_obj_set_style_text_color(bannerLabel, lv_color_hex(0xFFFFFF), 0);
   }
@@ -565,5 +598,107 @@ void uiTick() {
   else if (sw == SW_CLOSE_BRIGHT) showBrightness(false);
   else if (sw == SW_NEXT && curPage + 1 < pages.size()) showPage(curPage + 1);
   else if (sw == SW_PREV && curPage > 0) showPage(curPage - 1);
+  cameraTick();
   lv_timer_handler();
+}
+
+// --- firmware update progress card -------------------------------------------------------------------------
+static lv_obj_t* progCard;
+static lv_obj_t* progTitle;
+static lv_obj_t* progPhase;
+static lv_obj_t* progBar;
+static lv_obj_t* progPct;
+static lv_obj_t* progClose;
+
+static void buildProgress() {
+  if (progCard) return;
+  progCard = lv_obj_create(lv_layer_top());
+  lv_obj_remove_style_all(progCard);
+  lv_obj_set_size(progCard, scrW, scrH);
+  lv_obj_set_style_bg_color(progCard, lv_color_hex(0x0B0E11), 0);
+  lv_obj_set_style_bg_opa(progCard, LV_OPA_COVER, 0);
+  lv_obj_set_style_text_color(progCard, lv_color_hex(0xFFFFFF), 0);
+  lv_obj_add_flag(progCard, LV_OBJ_FLAG_CLICKABLE);  // swallows touches
+  lv_obj_remove_flag(progCard, LV_OBJ_FLAG_SCROLLABLE);
+  progTitle = lv_label_create(progCard);
+  lv_obj_set_style_text_font(progTitle, &lv_font_montserrat_24, 0);
+  lv_obj_align(progTitle, LV_ALIGN_TOP_MID, 0, scrH / 2 - 100);
+  progPhase = lv_label_create(progCard);
+  lv_obj_set_style_text_font(progPhase, &lv_font_montserrat_18, 0);
+  lv_obj_set_width(progPhase, scrW - 40);
+  lv_obj_set_style_text_align(progPhase, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_align(progPhase, LV_ALIGN_TOP_MID, 0, scrH / 2 - 56);
+  progBar = lv_bar_create(progCard);
+  lv_obj_set_size(progBar, scrW - 80, 18);
+  lv_obj_align(progBar, LV_ALIGN_TOP_MID, 0, scrH / 2 - 8);
+  lv_bar_set_range(progBar, 0, 100);
+  progPct = lv_label_create(progCard);
+  lv_obj_set_style_text_font(progPct, &lv_font_montserrat_18, 0);
+  lv_obj_align(progPct, LV_ALIGN_TOP_MID, 0, scrH / 2 + 22);
+  lv_obj_t* warn = lv_label_create(progCard);
+  lv_obj_set_style_text_font(warn, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_color(warn, lv_color_hex(0xFFD54F), 0);
+  lv_label_set_text(warn, "Do not power off or unplug");
+  lv_obj_align(warn, LV_ALIGN_TOP_MID, 0, scrH / 2 + 60);
+  progClose = lv_button_create(progCard);
+  lv_obj_set_size(progClose, 120, 44);
+  lv_obj_align(progClose, LV_ALIGN_TOP_MID, 0, scrH / 2 + 90);
+  lv_obj_t* cl = lv_label_create(progClose);
+  lv_label_set_text(cl, "Close");
+  lv_obj_center(cl);
+  lv_obj_add_event_cb(progClose, [](lv_event_t*) { lv_obj_add_flag(progCard, LV_OBJ_FLAG_HIDDEN); progShown = false; },
+                      LV_EVENT_CLICKED, nullptr);
+  lv_obj_add_flag(progCard, LV_OBJ_FLAG_HIDDEN);
+}
+
+void uiProgress(const char* title, const char* phase, int pct) {
+  static String lastPhase;
+  static int lastPct = -2;
+  static uint32_t lastPaint = 0;
+  buildProgress();
+  bool changed = lastPhase != phase || lastPct != pct;
+  if (!changed && progShown) return;
+  lastPhase = phase;
+  lastPct = pct;
+  if (!progShown) {
+    progShown = true;
+    cameraClose();
+    lv_obj_remove_flag(progCard, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(progCard);
+  }
+  lv_obj_add_flag(progClose, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_style_text_color(progPhase, lv_color_hex(0xFFFFFF), 0);
+  lv_label_set_text(progTitle, title);
+  lv_obj_align(progTitle, LV_ALIGN_TOP_MID, 0, scrH / 2 - 100);
+  lv_label_set_text(progPhase, phase);
+  if (pct >= 0) {
+    lv_obj_remove_flag(progBar, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_remove_flag(progPct, LV_OBJ_FLAG_HIDDEN);
+    lv_bar_set_value(progBar, pct, LV_ANIM_OFF);
+    String t = String(pct) + " %";
+    lv_label_set_text(progPct, t.c_str());
+    lv_obj_align(progPct, LV_ALIGN_TOP_MID, 0, scrH / 2 + 22);
+  } else {
+    lv_obj_add_flag(progBar, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(progPct, LV_OBJ_FLAG_HIDDEN);
+  }
+  if (millis() - lastPaint > 80 || pct >= 100 || pct < 0) {  // paint right away, this runs inside blocking loops
+    lastPaint = millis();
+    lv_refr_now(NULL);
+  }
+}
+
+void uiProgressFail(const char* title, const String& why) {
+  buildProgress();
+  progShown = true;
+  lv_obj_remove_flag(progCard, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_move_foreground(progCard);
+  lv_label_set_text(progTitle, title);
+  lv_obj_align(progTitle, LV_ALIGN_TOP_MID, 0, scrH / 2 - 100);
+  lv_label_set_text(progPhase, why.c_str());
+  lv_obj_set_style_text_color(progPhase, lv_color_hex(0xFF5252), 0);
+  lv_obj_add_flag(progBar, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(progPct, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_remove_flag(progClose, LV_OBJ_FLAG_HIDDEN);
+  lv_refr_now(NULL);
 }
