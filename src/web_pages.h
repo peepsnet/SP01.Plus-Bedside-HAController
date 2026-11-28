@@ -9,8 +9,10 @@ static const char EDITOR_HTML[] PROGMEM = R"HTML(<!doctype html>
 body{font:14px system-ui,sans-serif;background:#16181b;color:#e6e8ea;margin:0;padding:12px}
 a{color:#7ab}
 #wrap{display:flex;flex-wrap:wrap;gap:16px}
-#canvas{position:relative;background-color:#101214;border:1px solid #444;touch-action:none;
+#canvas{position:relative;flex:none;overflow:hidden;background-color:#101214;border:1px solid #444;touch-action:none;
  background-image:linear-gradient(#2a2e33 1px,transparent 1px),linear-gradient(90deg,#2a2e33 1px,transparent 1px);background-size:30px 30px}
+.b span{max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.b.sl span.ent{color:#9aa}
 .b{position:absolute;box-sizing:border-box;border-radius:12px;display:flex;align-items:center;justify-content:center;
  text-align:center;color:#fff;cursor:move;user-select:none;font-size:15px;overflow:hidden}
 .b.sl{background:#23272b!important;flex-direction:column;align-items:flex-start;justify-content:flex-start;padding:8px}
@@ -30,7 +32,7 @@ small{color:#9aa}
  <div style="margin-top:6px">Screen rotation: <select id="rot" style="width:auto"><option value="0">0 (landscape)</option><option value="1">90 clockwise (portrait)</option><option value="2">180 (landscape upside down)</option><option value="3">90 counter-clockwise (portrait)</option></select> <button id="rotgo" style="width:auto;display:inline-block;margin:0 0 0 6px">Rotate screen &amp; restart</button> <small>The layout selector above only chooses which layout you are editing, it does not turn the screen.</small></div></div>
 <div id="tabs"></div>
 <div id="wrap">
-<div id="canvas"></div>
+<div><div id="canvas"></div><small id="areanote"></small></div>
 <div id="form">
  <button id="add">+ Add button</button><button id="addsl">+ Add slider</button><button id="addcam">+ Add camera button</button>
  <div id="props" style="display:none">
@@ -73,7 +75,7 @@ small{color:#9aa}
 <script>
 const $=id=>document.getElementById(id);
 fetch('/api/version').then(r=>r.text()).then(v=>$('ver').textContent='v'+v);
-let S=1.5,W=480,H=280;const G=20;  // G = grid cell in screen pixels
+let S=1.5,W=480,H=280;const G=20,SMAX=1.5;  // G = grid cell in screen pixels
 let orient='landscape';
 const cells=v=>Math.round(v/G*10)/10;
 const ICONS=['','power','eye','home','play','pause','bell','settings','ok','wifi','audio','charge','image','video'];
@@ -81,9 +83,17 @@ const ACTIONS=[['toggle','Toggle'],['on','Turn on'],['off','Turn off'],['scene',
 let L={pages:[]},pi=0,sel=null;
 ICONS.forEach(i=>$('icon').add(new Option(i||'(none)',i)));
 ACTIONS.forEach(a=>$('action').add(new Option(a[1],a[0])));
+// The preview is the device screen area (W x H px) scaled by S, so one grid cell is always G*S px and every element
+// uses the same scale. S shrinks on narrow browsers so the whole area fits without scrolling.
+function fit(){
+ S=Math.max(0.4,Math.min(SMAX,(document.documentElement.clientWidth-26)/W));
+ const c=$('canvas');c.style.width=W*S+'px';c.style.height=H*S+'px';c.style.backgroundSize=G*S+'px '+G*S+'px';
+ $('areanote').textContent='Preview of the device screen area: '+W+' x '+H+' px = '+W/G+' x '+H/G+' cells';
+}
+let rzT;addEventListener('resize',()=>{clearTimeout(rzT);rzT=setTimeout(()=>{fit();if(L.pages.length)draw()},120)});
 function loadLayout(){
  W=orient=='portrait'?320:480;H=orient=='portrait'?440:280;
- const c=$('canvas');c.style.width=W*S+'px';c.style.height=H*S+'px';
+ fit();
  fetch('/api/layout?o='+orient).then(r=>r.json()).then(j=>{L=j;pi=0;sel=null;if(!L.pages.length)L.pages=[{name:'Page 1',buttons:[]}];draw()});
 }
 $('rotgo').onclick=async()=>{if(!confirm('Rotate the screen and restart the device?'))return;await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rotation:+$('rot').value})});$('msg').textContent='Restarting with the new rotation...'};
@@ -104,9 +114,11 @@ function draw(){
  const c=$('canvas');c.innerHTML='';
  const bs=L.pages[pi].buttons;
  bs.forEach((b,i)=>{
+  // keep every element inside the screen area (older layouts could overhang it)
+  b.w=Math.min(b.w,W);b.h=Math.min(b.h,H);b.x=Math.max(0,Math.min(W-b.w,b.x));b.y=Math.max(0,Math.min(H-b.h,b.y));
   const d=document.createElement('div');const sl=b.type=='slider';d.className='b'+(sl?' sl':'')+(sel===i?' sel':'');
-  d.style.cssText+=`left:${b.x*S}px;top:${b.y*S}px;width:${b.w*S}px;height:${b.h*S}px;background:${b.color||'#4A90E2'}`;
-  const t=document.createElement('span');t.textContent=b.label||b.entity_id||'';d.appendChild(t);
+  d.style.cssText+=`left:${b.x*S}px;top:${b.y*S}px;width:${b.w*S}px;height:${b.h*S}px;background:${b.color||'#4A90E2'};font-size:${Math.round(10*S)}px;border-radius:${Math.round(8*S)}px`;
+  const t=document.createElement('span');t.textContent=b.label||b.entity_id||'';if(!b.label)t.className='ent';d.appendChild(t);
   if(sl){const bar=document.createElement('i');bar.style.background=b.color||'#4A90E2';d.appendChild(bar)}
   d.onpointerdown=e=>{sel=i;drag(e,b,'move');showProps();markSel()};
   const h=document.createElement('div');h.className='h';h.onpointerdown=e=>{e.stopPropagation();sel=i;drag(e,b,'size')};
