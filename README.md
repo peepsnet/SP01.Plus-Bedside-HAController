@@ -65,8 +65,17 @@ Caveats: the on-device GitHub update does not verify TLS certificates and images
 
 - **Buttons:** toggle, on, off, scene, script, press, cover open/close/stop, lock/unlock, media play/pause. Buttons light up when the entity is on/open/playing/unlocked/heating.
 - **Sliders** (add with "+ Add slider" in the editor): light brightness, light color temperature (Kelvin), cover position, fan speed, media volume, climate target temperature, `number` and `input_number`. Sliders follow the entity's live value and send while you drag (at most every 300 ms) and on release. Optional `min`/`max` override the defaults. RGB color wheels and HVAC mode pickers are not done yet.
+- **Slider with a button:** in the editor, a button's settings have a checkbox *Also show a slider for this entity*. It adds a linked slider under the button (brightness for lights, position for covers, and so on) that follows the button when you move it and is removed when you untick the box or delete the button.
 - **Entity picker:** the editor loads your devices from Home Assistant (lights, switches, covers, fans, climate, media players, scenes, scripts, helpers, locks, buttons) so you can pick them by name; typing an id still works. It needs the Home Assistant connection to be up.
 - **Local and external URL:** Settings has a local address (tried first) and an optional external address, for example a Nabu Casa or reverse-proxy name. If the local one does not authenticate within 12 s the device switches to the external one, and while on external it retries local every 5 minutes.
+
+## Touchscreen settings menu and status icons
+
+- **Gear (bottom right)** opens the settings menu with **Wi-Fi** and **About**.
+  - **Wi-Fi:** shows the current network, signal and IP. **Join network** scans, lets you pick a network and type the password on an on-screen keyboard (open networks join directly); on success it saves and restarts. **Forget** clears the saved network and restarts into setup mode.
+  - **About:** firmware version, IP, web address, web login, Home Assistant status, and **Check update** / **Install**.
+- **Status icons** replace the old status text: a Wi-Fi icon and an outlined **HA** badge (shows `HA ext` when connected through the external address). Green is connected, amber is connecting or weak signal, red is a rejected token, gray is not set up. Tap the Wi-Fi icon to open the Wi-Fi settings. Style borrowed from the SpoolmanScale display (outlined badge, mint green on dark).
+- *All of this is untested on the board; the keyboard layout in particular may need tuning.*
 
 ## Touchscreen gestures and brightness
 

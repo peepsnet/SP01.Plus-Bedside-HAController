@@ -47,6 +47,8 @@ small{color:#9aa}
   <div id="btnprops">
    <label>Action</label><select id="action"></select>
    <label>Icon</label><select id="icon"></select>
+   <label style="margin-top:10px"><input id="withslider" type="checkbox" style="width:auto"> Also show a slider for this entity</label>
+   <small id="slnote"></small>
   </div>
   <div id="slprops">
    <label>Slider controls</label><select id="attr"><option value="">Default for this device</option><option value="brightness">Light brightness</option><option value="color_temp">Light color temperature</option></select>
@@ -97,10 +99,11 @@ function draw(){
 function markSel(){[...$('canvas').children].forEach((d,i)=>d.classList.toggle('sel',i===sel))}
 function drag(e,b,mode){
  e.preventDefault();const sx=e.clientX,sy=e.clientY,ox=b.x,oy=b.y,ow=b.w,oh=b.h,el=e.currentTarget.classList.contains('h')?e.currentTarget.parentNode:e.currentTarget;
+ const bs=L.pages[pi].buttons,lk=mode=='move'?bs.map((x,i)=>x.linked===b.id?i:-1).filter(i=>i>=0):[],lo=lk.map(i=>[bs[i].x,bs[i].y]);
  const mv=ev=>{const dx=Math.round((ev.clientX-sx)/S/G)*G,dy=Math.round((ev.clientY-sy)/S/G)*G;
   if(mode=='move'){b.x=Math.max(0,Math.min(W-b.w,ox+dx));b.y=Math.max(0,Math.min(H-b.h,oy+dy))}
   else{b.w=Math.max(2*G,Math.min(W-b.x,ow+dx));b.h=Math.max(2*G,Math.min(H-b.y,oh+dy))}
-  el.style.left=b.x*S+'px';el.style.top=b.y*S+'px';el.style.width=b.w*S+'px';el.style.height=b.h*S+'px';cellInfo(b)};
+  el.style.left=b.x*S+'px';el.style.top=b.y*S+'px';el.style.width=b.w*S+'px';el.style.height=b.h*S+'px';cellInfo(b);lk.forEach((i,n)=>{const t=bs[i];t.x=Math.max(0,Math.min(W-t.w,lo[n][0]+b.x-ox));t.y=Math.max(0,Math.min(H-t.h,lo[n][1]+b.y-oy));const e=$('canvas').children[i];e.style.left=t.x*S+'px';e.style.top=t.y*S+'px'})};
  const up=()=>{removeEventListener('pointermove',mv);removeEventListener('pointerup',up)};
  addEventListener('pointermove',mv);addEventListener('pointerup',up);
 }
@@ -119,22 +122,50 @@ function applyCells(){
  $('sizeinfo').firstChild.textContent=cells(b.w)+' x '+cells(b.h)+' cells  ('+b.w+' x '+b.h+' px)';
 }
 for(const id of['cw','ch','cx','cy'])$(id).onchange=applyCells;
+const SLIDER_DOMAINS=['light','cover','fan','media_player','climate','number','input_number'];
+const domainOf=b=>(b.entity_id||'').split('.')[0];
+const linkedIdx=b=>L.pages[pi].buttons.findIndex(x=>x.linked===b.id);
+function updateSliderBox(b){
+ const ok=SLIDER_DOMAINS.includes(domainOf(b));
+ $('withslider').disabled=!ok;$('withslider').checked=linkedIdx(b)>=0;
+ $('slnote').textContent=!b.entity_id?'Pick an entity first.':(ok?'':'No slider for this device type.');
+}
+$('withslider').onchange=()=>{
+ const bs=L.pages[pi].buttons,b=bs[sel];if(!b)return;
+ if($('withslider').checked){
+  // Place the slider right under the button, else above it, else at the bottom of the screen.
+  const w=Math.max(b.w,4*G),h=3*G;let x=Math.min(b.x,W-w),y=b.y+b.h;
+  if(y+h>H){y=b.y-h;if(y<0)y=Math.max(0,H-h)}
+  bs.push({id:'s'+Date.now(),type:'slider',label:b.label,entity_id:b.entity_id,color:b.color,x,y,w,h,linked:b.id});
+ }else{
+  const i=linkedIdx(b);if(i>=0){bs.splice(i,1);if(i<sel)sel--}
+ }
+ draw();
+};
+function syncLinked(b,k){
+ const bs=L.pages[pi].buttons,i=linkedIdx(b);if(i<0||!['label','entity_id','color'].includes(k))return;
+ bs[i][k]=b[k];const d=$('canvas').children[i];
+ if(k=='label'||k=='entity_id')d.firstChild.textContent=bs[i].label||bs[i].entity_id;
+ if(k=='color'){const bar=d.querySelector('i');if(bar)bar.style.background=b.color}
+}
 function showProps(){
  const b=sel!=null?L.pages[pi].buttons[sel]:null;$('props').style.display=b?'block':'none';if(!b)return;
  const sl=b.type=='slider';$('btnprops').style.display=sl?'none':'block';$('slprops').style.display=sl?'block':'none';
  for(const k of FIELDS)$(k).value=b[k]!==undefined?b[k]:(k=='color'?'#4A90E2':'');
  cellInfo(b);
+ if(!sl)updateSliderBox(b);
 }
 for(const k of FIELDS)$(k).oninput=()=>{
  const b=L.pages[pi].buttons[sel];
  if((k=='min'||k=='max')){if($(k).value==='')delete b[k];else b[k]=+$(k).value}else b[k]=$(k).value;
  const d=$('canvas').children[sel];
  if(k=='label'||k=='entity_id')d.firstChild.textContent=b.label||b.entity_id;
+ if(b.type!='slider'){syncLinked(b,k);if(k=='entity_id')updateSliderBox(b)}
  if(k=='color'){d.style.background=b.color;const i=d.querySelector('i');if(i)i.style.background=b.color}};
 $('add').onclick=()=>addW({type:'button',label:'New',icon:'power',x:20,y:20,w:140,h:80,action:'toggle'});
-$('addsl').onclick=()=>addW({type:'slider',label:'Brightness',x:20,y:20,w:200,h:80});
+$('addsl').onclick=()=>addW({type:'slider',label:'Brightness',x:20,y:20,w:200,h:60});
 function addW(o){const bs=L.pages[pi].buttons;bs.push(Object.assign({id:'b'+Date.now(),entity_id:'',color:'#4A90E2'},o));sel=bs.length-1;draw()}
-$('del').onclick=()=>{L.pages[pi].buttons.splice(sel,1);sel=null;draw()};
+$('del').onclick=()=>{const bs=L.pages[pi].buttons,b=bs[sel];bs.splice(sel,1);for(let i=bs.length-1;i>=0;i--)if(bs[i].linked===b.id)bs.splice(i,1);sel=null;draw()};
 $('addpage').onclick=()=>{L.pages.push({name:'Page '+(L.pages.length+1),buttons:[]});pi=L.pages.length-1;sel=null;draw()};
 $('renpage').onclick=()=>{const n=prompt('Page name',L.pages[pi].name);if(n){L.pages[pi].name=n;draw()}};
 $('delpage').onclick=()=>{if(L.pages.length>1&&confirm('Delete page?')){L.pages.splice(pi,1);pi=0;sel=null;draw()}};

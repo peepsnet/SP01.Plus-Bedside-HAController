@@ -27,3 +27,9 @@ void uiTick();
 void uiSetBrightnessPct(int pct, bool save);
 // Implemented in menu.cpp: true while the Settings overlay is showing (swipe gestures are ignored then).
 bool menuIsOpen();
+
+// Status icons in the bottom bar (Wi-Fi arcs and an outlined "HA" pill), replacing the old status text.
+// wifi: 0 off, 1 setup access point, 2 connecting, 3 connected (rssi in dBm used for the color)
+void uiSetWifiState(int state, int rssi);
+void uiSetHaState(HaState state);
+String uiStatusText();  // last Home Assistant status text, shown on the About screen

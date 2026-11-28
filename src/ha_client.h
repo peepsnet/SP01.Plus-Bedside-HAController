@@ -34,4 +34,6 @@ void haReconnect();  // after settings change
 const std::vector<std::pair<String, String>>& haEntities();
 bool haEntitiesLoading();
 void haRefreshEntities();
+enum HaState { HA_NOT_CONFIGURED, HA_CONNECTING, HA_LOCAL, HA_EXTERNAL, HA_AUTH_ERROR };
+HaState haState();
 String haEndpointName();  // "local" | "external" | ""

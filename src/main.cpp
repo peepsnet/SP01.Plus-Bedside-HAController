@@ -35,7 +35,6 @@ static void startWifi() {
   if (apMode) {
     WiFi.mode(WIFI_AP);
     WiFi.softAP("Bedside-Setup");  // open AP; browse to http://192.168.4.1/settings
-    uiSetStatus("Setup Wi-Fi: Bedside-Setup  192.168.4.1");
     if (cfg.wifiSsid.isEmpty())
       uiSetBanner("Wi-Fi is not set up yet\n1. On your phone, join Wi-Fi \"Bedside-Setup\"\n2. Open http://192.168.4.1/settings\nTap the gear for the web login.");
     else
@@ -43,7 +42,6 @@ static void startWifi() {
   } else {
     MDNS.begin(cfg.hostname.c_str());
     MDNS.addService("http", "tcp", 80);
-    uiSetStatus("http://" + cfg.hostname + ".local  " + WiFi.localIP().toString());
   }
 }
 
@@ -74,8 +72,19 @@ void setup() {
   }
 }
 
+static void updateStatusIcons() {
+  static uint32_t last = 0;
+  if (millis() - last < 1000) return;
+  last = millis();
+  if (apMode) uiSetWifiState(1, 0);
+  else if (WiFi.status() == WL_CONNECTED) uiSetWifiState(3, WiFi.RSSI());
+  else uiSetWifiState(2, 0);
+  uiSetHaState(haState());
+}
+
 void loop() {
   uiTick();
+  updateStatusIcons();
   webLoop();
   improvLoop();
   if (!apMode) haLoop();
