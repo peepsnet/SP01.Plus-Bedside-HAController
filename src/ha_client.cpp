@@ -27,7 +27,7 @@ static bool hasExternal() { return !cfg.haExtHost.isEmpty(); }
 static std::vector<std::pair<String, String>> entityCache;
 static bool loadingEntities = false;
 static const char* PICK_DOMAINS[] = {"light", "switch", "cover", "fan", "climate", "media_player", "scene", "script",
-                                     "input_boolean", "input_number", "number", "lock", "button", "input_button", "camera"};
+                                     "input_boolean", "input_number", "number", "lock", "button", "input_button", "camera", "sensor", "binary_sensor"};
 static constexpr int PICK_CHUNK = 100;  // entities per request: keeps each reply well under the 15 KB WebSocket limit
 static int pickDomain = 0, pickOffset = 0;
 static uint32_t tplId = 0;
@@ -84,7 +84,7 @@ static void handlePickResult(const char* text) {
     pos = nl + 1;
     int bar = line.indexOf('|');
     if (bar > 0) {
-      entityCache.emplace_back(line.substring(0, bar), line.substring(bar + 1));
+      if (entityCache.size() < 2500) entityCache.emplace_back(line.substring(0, bar), line.substring(bar + 1));  // heap guard
       lines++;
     }
   }
@@ -140,7 +140,7 @@ static void deliver(const char* entity, JsonObject o) {
   if (!s || !stateCb) return;
   HaLevels lv;
   handleLevels(entity, o["a"].as<JsonObject>(), s, lv);
-  stateCb(entity, s, lv);
+  stateCb(entity, s, lv, o["a"].as<JsonObjectConst>());
 }
 
 static void handleMessage(const char* payload, size_t len) {

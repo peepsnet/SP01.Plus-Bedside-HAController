@@ -1,5 +1,6 @@
 #pragma once
 #include <Arduino.h>
+#include <ArduinoJson.h>
 #include <cmath>
 #include <functional>
 #include <utility>
@@ -16,7 +17,8 @@ struct HaLevels {
   float value = NAN;        // number / input_number state
 };
 
-using StateCb = std::function<void(const String& entityId, const String& state, const HaLevels& levels)>;
+// attrs: the attributes carried by this update (all of them in the first snapshot, only changed ones afterwards).
+using StateCb = std::function<void(const String& entityId, const String& state, const HaLevels& levels, JsonObjectConst attrs)>;
 using StatusCb = std::function<void(const String& status)>;
 
 void haBegin(StateCb onState, StatusCb onStatus);
