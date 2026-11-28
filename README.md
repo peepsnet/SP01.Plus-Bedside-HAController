@@ -58,6 +58,7 @@ The 16 MB partition table (`default_16MB.csv`) has two app slots, so updates are
 
 - **Web:** `http://bedside.local/update`, choose the `-ota.bin`, upload. The device reboots.
 - **Touchscreen:** gear, **Check update** (asks GitHub for the latest release), then **Install** downloads that release's `-ota.bin` and flashes it.
+- **Progress:** every install (web upload or GitHub download) shows a full-screen card on the device with the phase (looking up, downloading/writing with a percent bar, verifying, rebooting) and any error with a Close button. The `/update` page shows upload percent, verifying, installed, then waits for the device to come back and shows the new version. Use the `-ota.bin`, not `-full.bin`.
 
 Caveats: the on-device GitHub update does not verify TLS certificates and images are not signed, and it only works if the repository is public. All OTA paths are *untested on hardware*; keep USB access handy.
 
@@ -74,8 +75,23 @@ Caveats: the on-device GitHub update does not verify TLS certificates and images
 - **Gear (bottom right)** opens the settings menu with **Wi-Fi** and **About**.
   - **Wi-Fi:** shows the current network and IP, plus the saved-network list. Tap a saved network to change its password, move it up/down in priority, join it now, or delete it. **Scan** lists nearby networks (tap one, type the password). **Add network** lets you type an SSID and password by hand for a network that is not in range. Save stores without connecting; Connect joins, and on success saves it as top priority and restarts.
   - **About:** firmware version, IP, web address, web login, Home Assistant status, and **Check update** / **Install**.
-- **Status icons** replace the old status text: a Wi-Fi icon and an outlined **HA** badge (shows `HA ext` when connected through the external address). Green is connected, amber is connecting or weak signal, red is a rejected token, gray is not set up. Tap the Wi-Fi icon to open the Wi-Fi settings. Style borrowed from the SpoolmanScale display (outlined badge, mint green on dark).
+- **Status icons** replace the old status text: a Wi-Fi icon and an outlined **HA** badge (shows `HA ext` when connected through the external address). Green is connected, amber is connecting or weak signal, red is a rejected token, gray is not set up. Tap the Wi-Fi icon to open the Wi-Fi settings. Style borrowed from the SpoolmanScale display (outlined badge, mint green on dark). The icons are small and sit just left of the gear.
 - *All of this is untested on the board; the keyboard layout in particular may need tuning.*
+
+## Screen rotation
+
+Gear, **Display** (or `Settings` on the web) rotates the screen: 0 (default landscape), 90 clockwise, 180, or 90 counter-clockwise. The device restarts to apply it and the touch panel follows. Landscape (0 and 180) uses the normal layout. Portrait (90 and 270) is 320 x 480 and has its **own layout** (the editor has a Landscape/Portrait switch, canvas 320 x 440). Until you save a portrait layout, the landscape one is squeezed to 2/3 of its width. *Untested on hardware: if 90 and 270 come out swapped, change `1 + cfg.rotation` to `1 - cfg.rotation` in `uiInit` (`src/ui.cpp`). The settings screens in portrait are compressed to fit and may look cramped.* If a rotation leaves the touch panel unusable, set it back at `http://bedside.local/settings`.
+
+## Camera button
+
+Add a **camera button** in the layout editor (`type: "camera"`). Give it either a Home Assistant camera entity (`camera.front_door`, streamed through HA's camera proxy with your long-lived token, local or external address) or an IP camera URL (`http://user:pass@192.168.1.50/mjpeg`, basic auth only). Tapping the button opens the stream full screen; a tap or swipe closes it.
+
+- **Full brightness option:** tick *Force full screen brightness while the camera is open* in the camera button's settings in the web editor (`"full_brightness": true`). The backlight goes to 100 % (ignoring the brightness maximum) while the view is open and returns to your saved brightness when it closes. There is no on-screen button editor, so this is set in the web editor only.
+- Formats: MJPEG (`multipart/x-mixed-replace`) or JPEG snapshots (polled repeatedly). RTSP and H.264 are not supported and cannot be on this chip. Progressive JPEGs are not supported.
+- Home Assistant entity: it tries `/api/camera_proxy_stream/<entity>` first and falls back to snapshots (`/api/camera_proxy/<entity>`).
+- Expected frame rate (an estimate, *not measured*): a native MJPEG camera at 640x480 may reach roughly 8 to 15 fps; larger frames or weak Wi-Fi are slower. Cameras that HA turns into a stream itself (RTSP, ONVIF and most generic cameras) are usually limited by HA to about 1 to 2 fps. Snapshot polling is about 2 to 5 fps. This is not full-motion video for every camera: for the best result use a camera's own MJPEG URL at 640x480 or lower.
+- Frames are shown at 1, 1/2, 1/4 or 1/8 size so they fit the screen without slow resampling (a 640x480 picture shows at 320x240, centered). The overlay shows the live fps.
+- TLS certificates are not verified for camera and HA video requests.
 
 ## Wi-Fi networks
 
@@ -116,6 +132,7 @@ Coordinates are pixels in a 480x280 area (the bottom 40 px is the page tab/statu
 | `src/ha_client.cpp` | HA WebSocket auth, subscribe, service calls |
 | `src/web.cpp`, `src/web_pages.h` | HTTP API + editor and settings pages |
 | `src/config.cpp` | Settings and layout storage |
+| `src/camera.cpp` | Full-screen camera view: MJPEG/snapshot download task and JPEG decode *(untested)* |
 | `src/improv.cpp` | Improv Wi-Fi serial provisioning *(untested)* |
 | `scripts/` | version injection, release-image merge, version bump, flasher manifest |
 | `site/` | web flasher page (ESP Web Tools) |

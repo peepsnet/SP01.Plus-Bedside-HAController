@@ -18,10 +18,13 @@ struct Config {
   int brightMinPct = 10;
   int brightMaxPct = 100;
   int brightnessPct = 80;  // last chosen value
+  // Screen rotation in 90 degree steps clockwise from the default landscape: 0, 1 (90 cw), 2 (180), 3 (90 ccw).
+  int rotation = 0;
   String adminPass;    // HTTP basic-auth password for the web UI (user: admin). Generated on first boot.
 };
 
 extern Config cfg;
+inline bool cfgPortrait() { return cfg.rotation & 1; }
 
 // Saved Wi-Fi networks, highest priority first (index 0). Passwords stay on the device and are never sent to a browser.
 struct WifiNet {
@@ -42,5 +45,6 @@ void configClampBrightness();
 bool configLoad();
 bool configSave();
 extern const char* DEFAULT_LAYOUT;  // used when /layout.json is missing
-String layoutRead();
-bool layoutWrite(const String& json);
+// Portrait has its own layout file. Until one is saved, the landscape layout is used with x and width squeezed to fit.
+String layoutRead(bool portrait);
+bool layoutWrite(const String& json, bool portrait);

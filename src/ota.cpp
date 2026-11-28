@@ -1,5 +1,6 @@
 #include "ota.h"
 #include "version.h"
+#include "ui.h"
 #include <ArduinoJson.h>
 #include <HTTPClient.h>
 #include <HTTPUpdate.h>
@@ -8,6 +9,9 @@
 // NOTE: TLS certificates are NOT verified (setInsecure) to avoid shipping a CA bundle in milestone two.
 // Anyone able to MITM your network could serve a malicious image. Firmware images are not signed either.
 // Works for public repositories only. All of this is untested on hardware.
+
+void otaReport(const char* phase, int pct) { uiProgress("Updating firmware", phase, pct); }
+void otaFail(const String& why) { uiProgressFail("Update failed", why); }
 
 String otaLatestTag() {
   WiFiClientSecure c;
@@ -48,6 +52,7 @@ String otaInstallLatest() {
     c.setInsecure();
     HTTPClient h;
     h.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+    otaReport("Looking up the latest release", -1);
     if (!h.begin(c, "https://api.github.com/repos/" GH_REPO "/releases/latest")) return "begin failed";
     h.addHeader("User-Agent", "bedside-controller");
     if (h.GET() != 200) return "release lookup failed";
@@ -65,9 +70,19 @@ String otaInstallLatest() {
   WiFiClientSecure c;
   c.setInsecure();
   httpUpdate.setFollowRedirects(HTTPC_FORCE_FOLLOW_REDIRECTS);  // GitHub redirects to a CDN
-  httpUpdate.rebootOnUpdate(true);
+  httpUpdate.rebootOnUpdate(false);  // so the "Rebooting" status can be shown first
+  httpUpdate.onStart([] { otaReport("Downloading and writing", 0); });
+  httpUpdate.onProgress([](int cur, int total) {
+    if (total <= 0) return;
+    int pct = (int)((int64_t)cur * 100 / total);
+    otaReport(pct >= 100 ? "Verifying" : "Downloading and writing", pct);
+  });
+  otaReport("Connecting to download", -1);
   t_httpUpdate_return r = httpUpdate.update(c, url);
   if (r == HTTP_UPDATE_NO_UPDATES) return "No update";
   if (r == HTTP_UPDATE_FAILED) return httpUpdate.getLastErrorString();
+  otaReport("Rebooting", 100);
+  delay(1200);
+  ESP.restart();
   return "";
 }

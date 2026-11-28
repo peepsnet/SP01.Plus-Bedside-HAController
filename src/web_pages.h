@@ -9,7 +9,7 @@ static const char EDITOR_HTML[] PROGMEM = R"HTML(<!doctype html>
 body{font:14px system-ui,sans-serif;background:#16181b;color:#e6e8ea;margin:0;padding:12px}
 a{color:#7ab}
 #wrap{display:flex;flex-wrap:wrap;gap:16px}
-#canvas{position:relative;width:720px;height:420px;background-color:#101214;border:1px solid #444;touch-action:none;
+#canvas{position:relative;background-color:#101214;border:1px solid #444;touch-action:none;
  background-image:linear-gradient(#2a2e33 1px,transparent 1px),linear-gradient(90deg,#2a2e33 1px,transparent 1px);background-size:30px 30px}
 .b{position:absolute;box-sizing:border-box;border-radius:12px;display:flex;align-items:center;justify-content:center;
  text-align:center;color:#fff;cursor:move;user-select:none;font-size:15px;overflow:hidden}
@@ -26,11 +26,12 @@ button{cursor:pointer;margin-top:6px}
 small{color:#9aa}
 </style></head><body>
 <h3>Bedside layout editor &nbsp; <small><a href="/settings">Settings</a> &middot; <a href="/update">Update</a> &middot; <span id="ver"></span></small></h3>
+<div style="margin:6px 0"><select id="orient" style="width:auto"><option value="landscape">Landscape layout (480 x 280)</option><option value="portrait">Portrait layout (320 x 440)</option></select> <small id="orientnote"></small></div>
 <div id="tabs"></div>
 <div id="wrap">
 <div id="canvas"></div>
 <div id="form">
- <button id="add">+ Add button</button><button id="addsl">+ Add slider</button>
+ <button id="add">+ Add button</button><button id="addsl">+ Add slider</button><button id="addcam">+ Add camera button</button>
  <div id="props" style="display:none">
   <label>Label</label><input id="label">
   <label>Entity <small id="entnote"></small></label><input id="entity_id" list="ents" placeholder="light.bedside" autocomplete="off">
@@ -45,10 +46,16 @@ small{color:#9aa}
   </div>
   <div id="sizeinfo"><small></small></div>
   <div id="btnprops">
-   <label>Action</label><select id="action"></select>
+   <div id="actwrap"><label>Action</label><select id="action"></select></div>
    <label>Icon</label><select id="icon"></select>
-   <label style="margin-top:10px"><input id="withslider" type="checkbox" style="width:auto"> Also show a slider for this entity</label>
-   <small id="slnote"></small>
+   <div id="slwrap"><label style="margin-top:10px"><input id="withslider" type="checkbox" style="width:auto"> Also show a slider for this entity</label>
+   <small id="slnote"></small></div>
+  </div>
+  <div id="camprops" style="display:none">
+   <label>IP camera URL <small>(or pick a Home Assistant camera entity above)</small></label>
+   <input id="url" placeholder="http://user:pass@192.168.1.50/mjpeg" autocomplete="off">
+   <label><input id="fullbright" type="checkbox" style="width:auto"> Force full screen brightness while the camera is open</label>
+   <small>Tapping the button opens the camera full screen; tap or swipe to close. Needs an MJPEG or JPEG snapshot URL. RTSP is not supported.</small>
   </div>
   <div id="slprops">
    <label>Slider controls</label><select id="attr"><option value="">Default for this device</option><option value="brightness">Light brightness</option><option value="color_temp">Light color temperature</option></select>
@@ -65,14 +72,22 @@ small{color:#9aa}
 <script>
 const $=id=>document.getElementById(id);
 fetch('/api/version').then(r=>r.text()).then(v=>$('ver').textContent='v'+v);
-const S=1.5,W=480,H=280,G=20;  // G = grid cell in screen pixels (24 x 14 cells)
+let S=1.5,W=480,H=280;const G=20;  // G = grid cell in screen pixels
+let orient='landscape';
 const cells=v=>Math.round(v/G*10)/10;
-const ICONS=['','power','eye','home','play','pause','bell','settings','ok','wifi','audio','charge','image'];
+const ICONS=['','power','eye','home','play','pause','bell','settings','ok','wifi','audio','charge','image','video'];
 const ACTIONS=[['toggle','Toggle'],['on','Turn on'],['off','Turn off'],['scene','Activate scene'],['script','Run script'],['press','Press button'],['open','Cover: open'],['close','Cover: close'],['stop','Cover: stop'],['lock','Lock'],['unlock','Unlock'],['play_pause','Media: play/pause']];
 let L={pages:[]},pi=0,sel=null;
 ICONS.forEach(i=>$('icon').add(new Option(i||'(none)',i)));
 ACTIONS.forEach(a=>$('action').add(new Option(a[1],a[0])));
-fetch('/api/layout').then(r=>r.json()).then(j=>{L=j;if(!L.pages.length)L.pages=[{name:'Page 1',buttons:[]}];draw()});
+function loadLayout(){
+ W=orient=='portrait'?320:480;H=orient=='portrait'?440:280;
+ const c=$('canvas');c.style.width=W*S+'px';c.style.height=H*S+'px';
+ fetch('/api/layout?o='+orient).then(r=>r.json()).then(j=>{L=j;pi=0;sel=null;if(!L.pages.length)L.pages=[{name:'Page 1',buttons:[]}];draw()});
+}
+fetch('/api/config').then(r=>r.json()).then(j=>{orient=(j.rotation&1)?'portrait':'landscape';$('orient').value=orient;
+ $('orientnote').textContent='Screen is currently '+(orient=='portrait'?'portrait':'landscape')+'. Each orientation has its own layout.';loadLayout()}).catch(loadLayout);
+$('orient').onchange=()=>{if(confirm('Switch layout? Unsaved changes to this one are lost.')){orient=$('orient').value;loadLayout()}else $('orient').value=orient};
 function loadEnts(refresh){
  fetch('/api/entities'+(refresh?'?refresh=1':'')).then(r=>r.json()).then(j=>{
   $('ents').innerHTML='';j.entities.forEach(e=>{const o=document.createElement('option');o.value=e[0];o.label=e[1];$('ents').appendChild(o)});
@@ -107,7 +122,7 @@ function drag(e,b,mode){
  const up=()=>{removeEventListener('pointermove',mv);removeEventListener('pointerup',up)};
  addEventListener('pointermove',mv);addEventListener('pointerup',up);
 }
-const FIELDS=['label','icon','entity_id','action','color','attr','min','max'];
+const FIELDS=['label','icon','entity_id','action','color','attr','min','max','url'];
 function cellInfo(b){
  $('cw').value=cells(b.w);$('ch').value=cells(b.h);$('cx').value=cells(b.x);$('cy').value=cells(b.y);
  $('sizeinfo').firstChild.textContent=cells(b.w)+' x '+cells(b.h)+' cells  ('+b.w+' x '+b.h+' px)';
@@ -150,34 +165,37 @@ function syncLinked(b,k){
 }
 function showProps(){
  const b=sel!=null?L.pages[pi].buttons[sel]:null;$('props').style.display=b?'block':'none';if(!b)return;
- const sl=b.type=='slider';$('btnprops').style.display=sl?'none':'block';$('slprops').style.display=sl?'block':'none';
+ const sl=b.type=='slider',cam=b.type=='camera';$('btnprops').style.display=sl?'none':'block';$('slprops').style.display=sl?'block':'none';
+ $('camprops').style.display=cam?'block':'none';if(cam)$('fullbright').checked=!!b.full_brightness;$('actwrap').style.display=cam?'none':'block';$('slwrap').style.display=cam?'none':'block';
  for(const k of FIELDS)$(k).value=b[k]!==undefined?b[k]:(k=='color'?'#4A90E2':'');
  cellInfo(b);
- if(!sl)updateSliderBox(b);
+ if(!sl&&!cam)updateSliderBox(b);
 }
 for(const k of FIELDS)$(k).oninput=()=>{
  const b=L.pages[pi].buttons[sel];
  if((k=='min'||k=='max')){if($(k).value==='')delete b[k];else b[k]=+$(k).value}else b[k]=$(k).value;
  const d=$('canvas').children[sel];
  if(k=='label'||k=='entity_id')d.firstChild.textContent=b.label||b.entity_id;
- if(b.type!='slider'){syncLinked(b,k);if(k=='entity_id')updateSliderBox(b)}
+ if(b.type!='slider'&&b.type!='camera'){syncLinked(b,k);if(k=='entity_id')updateSliderBox(b)}
  if(k=='color'){d.style.background=b.color;const i=d.querySelector('i');if(i)i.style.background=b.color}};
 $('add').onclick=()=>addW({type:'button',label:'New',icon:'power',x:20,y:20,w:140,h:80,action:'toggle'});
+$('fullbright').onchange=()=>{const b=L.pages[pi].buttons[sel];if(!b)return;if($('fullbright').checked)b.full_brightness=true;else delete b.full_brightness};
+$('addcam').onclick=()=>addW({type:'camera',label:'Camera',icon:'video',x:20,y:20,w:140,h:80,color:'#8E6BBF'});
 $('addsl').onclick=()=>addW({type:'slider',label:'Brightness',x:20,y:20,w:200,h:60});
 function addW(o){const bs=L.pages[pi].buttons;bs.push(Object.assign({id:'b'+Date.now(),entity_id:'',color:'#4A90E2'},o));sel=bs.length-1;draw()}
 $('del').onclick=()=>{const bs=L.pages[pi].buttons,b=bs[sel];bs.splice(sel,1);for(let i=bs.length-1;i>=0;i--)if(bs[i].linked===b.id)bs.splice(i,1);sel=null;draw()};
 $('addpage').onclick=()=>{L.pages.push({name:'Page '+(L.pages.length+1),buttons:[]});pi=L.pages.length-1;sel=null;draw()};
 $('renpage').onclick=()=>{const n=prompt('Page name',L.pages[pi].name);if(n){L.pages[pi].name=n;draw()}};
 $('delpage').onclick=()=>{if(L.pages.length>1&&confirm('Delete page?')){L.pages.splice(pi,1);pi=0;sel=null;draw()}};
-$('save').onclick=async()=>{const r=await fetch('/api/layout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(L)});
- $('msg').textContent=r.ok?'Saved and applied.':'Save failed: '+await r.text()};
+$('save').onclick=async()=>{const r=await fetch('/api/layout?o='+orient,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(L)});
+ $('msg').textContent=r.ok?'Saved. (Applied now if it is the active orientation.)':'Save failed: '+await r.text()};
 </script></body></html>)HTML";
 
 static const char SETTINGS_HTML[] PROGMEM = R"HTML(<!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Bedside settings</title>
 <style>body{font:15px system-ui,sans-serif;background:#16181b;color:#e6e8ea;padding:14px;max-width:420px}
-label{display:block;margin:10px 0 3px;color:#9aa}input,button{width:100%;box-sizing:border-box;padding:8px;background:#23262a;color:#eee;border:1px solid #444;border-radius:6px}
+label{display:block;margin:10px 0 3px;color:#9aa}input,select,button{width:100%;box-sizing:border-box;padding:8px;background:#23262a;color:#eee;border:1px solid #444;border-radius:6px}
 a{color:#7ab}</style></head><body>
 <h3>Settings &nbsp; <small><a href="/">Layout</a> &middot; <a href="/update">Update</a></small></h3>
 <h4>Wi-Fi networks</h4>
@@ -200,6 +218,9 @@ a{color:#7ab}</style></head><body>
 <label>Host</label><input name="ha_ext_host" placeholder="myname.duckdns.org or xxxx.ui.nabu.casa">
 <label>Port</label><input name="ha_ext_port" type="number" value="443">
 <label><input type="checkbox" name="ha_ext_tls" style="width:auto" checked> Use TLS (wss)</label>
+<h4>Screen rotation</h4>
+<label>Rotate the display (restarts; portrait has its own layout)</label>
+<select name="rotation"><option value="0">0 (landscape, default)</option><option value="1">90 clockwise (portrait)</option><option value="2">180 (landscape upside down)</option><option value="3">90 counter-clockwise (portrait)</option></select>
 <h4>Screen brightness range (used by the swipe-down slider)</h4>
 <label>Minimum % (5 to 90)</label><input name="bright_min" type="number" min="5" max="90" value="10">
 <label>Maximum % (at least 10 above minimum, up to 100)</label><input name="bright_max" type="number" min="15" max="100" value="100">
@@ -244,7 +265,7 @@ $('wadd').onclick=async()=>{try{await api('/api/wifi/save',{ssid:$('wssid').valu
 loadWifi();
 const f=document.getElementById('f');
 fetch('/api/config').then(r=>r.json()).then(j=>{for(const k in j){const e=f.elements[k];if(!e)continue;if(e.type=='checkbox')e.checked=j[k];else e.value=j[k]}});
-f.onsubmit=async e=>{e.preventDefault();const o={};for(const el of f.elements){if(!el.name)continue;o[el.name]=el.type=='checkbox'?el.checked:el.type=='number'?+el.value:el.value}
+f.onsubmit=async e=>{e.preventDefault();const o={};for(const el of f.elements){if(!el.name)continue;o[el.name]=el.type=='checkbox'?el.checked:(el.type=='number'||el.name=='rotation')?+el.value:el.value}
  const r=await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(o)});
  document.getElementById('msg').textContent=r.ok?'Saved. Device is restarting...':'Save failed'};
 </script></body></html>)HTML";
@@ -256,15 +277,29 @@ static const char UPDATE_HTML[] PROGMEM = R"HTML(<!doctype html>
 input,button{width:100%;box-sizing:border-box;padding:8px;margin-top:10px;background:#23262a;color:#eee;border:1px solid #444;border-radius:6px}a{color:#7ab}</style></head><body>
 <h3>Firmware update &nbsp; <small><a href="/">Layout</a></small></h3>
 <p>Running: <b id="ver">...</b></p>
-<p>Upload <code>firmware.bin</code> from a GitHub release (or <code>.pio/build/wt32-sc01-plus/firmware.bin</code>). The device reboots when done.</p>
+<p>Upload the <code>*-ota.bin</code> file from a GitHub release (not the <code>-full.bin</code>). The device shows the same progress on its screen and reboots when done.</p>
 <input type="file" id="f" accept=".bin"><button id="go" style="background:#2d7a3e">Upload &amp; install</button>
-<progress id="p" value="0" max="100" style="width:100%;margin-top:10px"></progress><div id="msg"></div>
+<progress id="p" value="0" max="100" style="width:100%;margin-top:10px"></progress>
+<div id="stage" style="font-weight:600;margin-top:4px"></div><div id="msg"></div>
 <script>
 const $=id=>document.getElementById(id);
-fetch('/api/version').then(r=>r.text()).then(v=>$('ver').textContent='v'+v);
-$('go').onclick=()=>{const f=$('f').files[0];if(!f)return;const x=new XMLHttpRequest(),fd=new FormData();fd.append('firmware',f);
- x.upload.onprogress=e=>$('p').value=e.loaded/e.total*100;
- x.onload=()=>$('msg').textContent=x.status==200?'Installed. Rebooting...':'Failed: '+x.responseText;
- x.onerror=()=>$('msg').textContent='Connection lost (may be rebooting).';
+fetch('/api/version').then(r=>r.text()).then(v=>{$('ver').textContent='v'+v;window.oldVer=v});
+const stage=(t,cls)=>{$('stage').textContent=t;$('stage').style.color=cls=='bad'?'#ff5252':cls=='ok'?'#2ed39a':'#e6e8ea'};
+function waitForReboot(){
+ stage('Rebooting... waiting for the device to come back');$('p').removeAttribute('value');
+ let tries=0,wentDown=false;
+ const t=setInterval(async()=>{tries++;
+  try{const r=await fetch('/api/version',{cache:'no-store'});
+   if(r.ok){const v=await r.text();if(wentDown||tries>6){clearInterval(t);$('p').value=100;stage('Done. Device is back on v'+v+(window.oldVer&&v!=window.oldVer?' (updated from v'+window.oldVer+')':''),'ok');$('ver').textContent='v'+v}}
+  }catch(e){wentDown=true}
+  if(tries>60){clearInterval(t);stage('The device has not come back after 2 minutes. Check its screen.','bad')}},2000);
+}
+$('go').onclick=()=>{const f=$('f').files[0];if(!f)return;$('go').disabled=true;$('msg').textContent='';
+ const x=new XMLHttpRequest(),fd=new FormData();fd.append('firmware',f);
+ stage('Uploading 0%');
+ x.upload.onprogress=e=>{if(!e.lengthComputable)return;const p=e.loaded/e.total*100;$('p').value=p;stage('Uploading and writing '+Math.round(p)+'%')};
+ x.upload.onload=()=>stage('Verifying the image...');
+ x.onload=()=>{if(x.status==200){stage('Installed. Rebooting...','ok');waitForReboot()}else{$('go').disabled=false;stage('Install failed','bad');$('msg').textContent=x.responseText}};
+ x.onerror=()=>{stage('Connection lost during upload. The device may be rebooting; checking...','bad');waitForReboot()};
  x.open('POST','/update');x.send(fd)};
 </script></body></html>)HTML";

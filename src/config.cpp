@@ -86,6 +86,7 @@ bool configLoad() {
   cfg.haToken = d["ha_token"] | "";
   cfg.hostname = d["hostname"] | "bedside";
   cfg.adminPass = d["admin_pass"] | "";
+  cfg.rotation = constrain((int)(d["rotation"] | 0), 0, 3);
   cfg.brightMinPct = d["bright_min"] | 10;
   cfg.brightMaxPct = d["bright_max"] | 100;
   cfg.brightnessPct = d["brightness"] | 80;
@@ -110,6 +111,7 @@ bool configSave() {
   d["ha_token"] = cfg.haToken;
   d["hostname"] = cfg.hostname;
   d["admin_pass"] = cfg.adminPass;
+  d["rotation"] = cfg.rotation;
   d["bright_min"] = cfg.brightMinPct;
   d["bright_max"] = cfg.brightMaxPct;
   d["brightness"] = cfg.brightnessPct;
@@ -119,15 +121,35 @@ bool configSave() {
   return true;
 }
 
-String layoutRead() {
+static String landscapeRead() {
   File f = LittleFS.open("/layout.json", "r");
   if (!f) return String(DEFAULT_LAYOUT);
   String s = f.readString();
   return s.length() ? s : String(DEFAULT_LAYOUT);
 }
 
-bool layoutWrite(const String& json) {
-  File f = LittleFS.open("/layout.json", "w");
+String layoutRead(bool portrait) {
+  if (!portrait) return landscapeRead();
+  File f = LittleFS.open("/layout_portrait.json", "r");
+  if (f) {
+    String s = f.readString();
+    if (s.length()) return s;
+  }
+  // No portrait layout yet: squeeze the landscape one (480 wide) into the 320 px portrait width.
+  JsonDocument d;
+  if (deserializeJson(d, landscapeRead())) return landscapeRead();
+  for (JsonObject p : d["pages"].as<JsonArray>())
+    for (JsonObject b : p["buttons"].as<JsonArray>()) {
+      b["x"] = (int)(b["x"] | 0) * 2 / 3;
+      b["w"] = max(40, (int)(b["w"] | 100) * 2 / 3);
+    }
+  String out;
+  serializeJson(d, out);
+  return out;
+}
+
+bool layoutWrite(const String& json, bool portrait) {
+  File f = LittleFS.open(portrait ? "/layout_portrait.json" : "/layout.json", "w");
   if (!f) return false;
   f.print(json);
   return true;
