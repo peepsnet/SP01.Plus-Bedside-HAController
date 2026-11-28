@@ -47,6 +47,8 @@ small{color:#9aa}
   <div id="btnprops">
    <label>Action</label><select id="action"></select>
    <label>Icon</label><select id="icon"></select>
+   <label style="margin-top:10px"><input id="withslider" type="checkbox" style="width:auto"> Also show a slider for this entity</label>
+   <small id="slnote"></small>
   </div>
   <div id="slprops">
    <label>Slider controls</label><select id="attr"><option value="">Default for this device</option><option value="brightness">Light brightness</option><option value="color_temp">Light color temperature</option></select>
@@ -97,10 +99,11 @@ function draw(){
 function markSel(){[...$('canvas').children].forEach((d,i)=>d.classList.toggle('sel',i===sel))}
 function drag(e,b,mode){
  e.preventDefault();const sx=e.clientX,sy=e.clientY,ox=b.x,oy=b.y,ow=b.w,oh=b.h,el=e.currentTarget.classList.contains('h')?e.currentTarget.parentNode:e.currentTarget;
+ const bs=L.pages[pi].buttons,lk=mode=='move'?bs.map((x,i)=>x.linked===b.id?i:-1).filter(i=>i>=0):[],lo=lk.map(i=>[bs[i].x,bs[i].y]);
  const mv=ev=>{const dx=Math.round((ev.clientX-sx)/S/G)*G,dy=Math.round((ev.clientY-sy)/S/G)*G;
   if(mode=='move'){b.x=Math.max(0,Math.min(W-b.w,ox+dx));b.y=Math.max(0,Math.min(H-b.h,oy+dy))}
   else{b.w=Math.max(2*G,Math.min(W-b.x,ow+dx));b.h=Math.max(2*G,Math.min(H-b.y,oh+dy))}
-  el.style.left=b.x*S+'px';el.style.top=b.y*S+'px';el.style.width=b.w*S+'px';el.style.height=b.h*S+'px';cellInfo(b)};
+  el.style.left=b.x*S+'px';el.style.top=b.y*S+'px';el.style.width=b.w*S+'px';el.style.height=b.h*S+'px';cellInfo(b);lk.forEach((i,n)=>{const t=bs[i];t.x=Math.max(0,Math.min(W-t.w,lo[n][0]+b.x-ox));t.y=Math.max(0,Math.min(H-t.h,lo[n][1]+b.y-oy));const e=$('canvas').children[i];e.style.left=t.x*S+'px';e.style.top=t.y*S+'px'})};
  const up=()=>{removeEventListener('pointermove',mv);removeEventListener('pointerup',up)};
  addEventListener('pointermove',mv);addEventListener('pointerup',up);
 }
@@ -119,22 +122,50 @@ function applyCells(){
  $('sizeinfo').firstChild.textContent=cells(b.w)+' x '+cells(b.h)+' cells  ('+b.w+' x '+b.h+' px)';
 }
 for(const id of['cw','ch','cx','cy'])$(id).onchange=applyCells;
+const SLIDER_DOMAINS=['light','cover','fan','media_player','climate','number','input_number'];
+const domainOf=b=>(b.entity_id||'').split('.')[0];
+const linkedIdx=b=>L.pages[pi].buttons.findIndex(x=>x.linked===b.id);
+function updateSliderBox(b){
+ const ok=SLIDER_DOMAINS.includes(domainOf(b));
+ $('withslider').disabled=!ok;$('withslider').checked=linkedIdx(b)>=0;
+ $('slnote').textContent=!b.entity_id?'Pick an entity first.':(ok?'':'No slider for this device type.');
+}
+$('withslider').onchange=()=>{
+ const bs=L.pages[pi].buttons,b=bs[sel];if(!b)return;
+ if($('withslider').checked){
+  // Place the slider right under the button, else above it, else at the bottom of the screen.
+  const w=Math.max(b.w,4*G),h=3*G;let x=Math.min(b.x,W-w),y=b.y+b.h;
+  if(y+h>H){y=b.y-h;if(y<0)y=Math.max(0,H-h)}
+  bs.push({id:'s'+Date.now(),type:'slider',label:b.label,entity_id:b.entity_id,color:b.color,x,y,w,h,linked:b.id});
+ }else{
+  const i=linkedIdx(b);if(i>=0){bs.splice(i,1);if(i<sel)sel--}
+ }
+ draw();
+};
+function syncLinked(b,k){
+ const bs=L.pages[pi].buttons,i=linkedIdx(b);if(i<0||!['label','entity_id','color'].includes(k))return;
+ bs[i][k]=b[k];const d=$('canvas').children[i];
+ if(k=='label'||k=='entity_id')d.firstChild.textContent=bs[i].label||bs[i].entity_id;
+ if(k=='color'){const bar=d.querySelector('i');if(bar)bar.style.background=b.color}
+}
 function showProps(){
  const b=sel!=null?L.pages[pi].buttons[sel]:null;$('props').style.display=b?'block':'none';if(!b)return;
  const sl=b.type=='slider';$('btnprops').style.display=sl?'none':'block';$('slprops').style.display=sl?'block':'none';
  for(const k of FIELDS)$(k).value=b[k]!==undefined?b[k]:(k=='color'?'#4A90E2':'');
  cellInfo(b);
+ if(!sl)updateSliderBox(b);
 }
 for(const k of FIELDS)$(k).oninput=()=>{
  const b=L.pages[pi].buttons[sel];
  if((k=='min'||k=='max')){if($(k).value==='')delete b[k];else b[k]=+$(k).value}else b[k]=$(k).value;
  const d=$('canvas').children[sel];
  if(k=='label'||k=='entity_id')d.firstChild.textContent=b.label||b.entity_id;
+ if(b.type!='slider'){syncLinked(b,k);if(k=='entity_id')updateSliderBox(b)}
  if(k=='color'){d.style.background=b.color;const i=d.querySelector('i');if(i)i.style.background=b.color}};
 $('add').onclick=()=>addW({type:'button',label:'New',icon:'power',x:20,y:20,w:140,h:80,action:'toggle'});
-$('addsl').onclick=()=>addW({type:'slider',label:'Brightness',x:20,y:20,w:200,h:80});
+$('addsl').onclick=()=>addW({type:'slider',label:'Brightness',x:20,y:20,w:200,h:60});
 function addW(o){const bs=L.pages[pi].buttons;bs.push(Object.assign({id:'b'+Date.now(),entity_id:'',color:'#4A90E2'},o));sel=bs.length-1;draw()}
-$('del').onclick=()=>{L.pages[pi].buttons.splice(sel,1);sel=null;draw()};
+$('del').onclick=()=>{const bs=L.pages[pi].buttons,b=bs[sel];bs.splice(sel,1);for(let i=bs.length-1;i>=0;i--)if(bs[i].linked===b.id)bs.splice(i,1);sel=null;draw()};
 $('addpage').onclick=()=>{L.pages.push({name:'Page '+(L.pages.length+1),buttons:[]});pi=L.pages.length-1;sel=null;draw()};
 $('renpage').onclick=()=>{const n=prompt('Page name',L.pages[pi].name);if(n){L.pages[pi].name=n;draw()}};
 $('delpage').onclick=()=>{if(L.pages.length>1&&confirm('Delete page?')){L.pages.splice(pi,1);pi=0;sel=null;draw()}};
@@ -149,9 +180,18 @@ static const char SETTINGS_HTML[] PROGMEM = R"HTML(<!doctype html>
 label{display:block;margin:10px 0 3px;color:#9aa}input,button{width:100%;box-sizing:border-box;padding:8px;background:#23262a;color:#eee;border:1px solid #444;border-radius:6px}
 a{color:#7ab}</style></head><body>
 <h3>Settings &nbsp; <small><a href="/">Layout</a> &middot; <a href="/update">Update</a></small></h3>
+<h4>Wi-Fi networks</h4>
+<div id="wcur"><small>Loading...</small></div>
+<table id="wlist" style="width:100%;border-collapse:collapse"></table>
+<button id="wscan" type="button">Scan for networks</button>
+<div id="wscanres"></div>
+<label style="margin-top:14px">Add a network manually (it can be out of range right now)</label>
+<input id="wssid" placeholder="Network name (SSID)" autocomplete="off">
+<input id="wpass" type="password" placeholder="Password (empty for an open network)" style="margin-top:6px" autocomplete="new-password">
+<button id="wadd" type="button" style="margin-top:6px">Save network</button>
+<small>The device joins the saved network with the highest priority that is in range. Saved passwords are never shown; use "Password" to replace one.</small>
+<hr style="margin:18px 0">
 <form id="f">
-<label>Wi-Fi SSID</label><input name="wifi_ssid">
-<label>Wi-Fi password (leave blank to keep)</label><input name="wifi_pass" type="password">
 <h4>Home Assistant, local address (tried first)</h4>
 <label>Host</label><input name="ha_host" placeholder="homeassistant.local or 192.168.1.10">
 <label>Port</label><input name="ha_port" type="number" value="8123">
@@ -167,6 +207,41 @@ a{color:#7ab}</style></head><body>
 <button type="submit" style="margin-top:14px;background:#2d7a3e">Save &amp; restart</button>
 </form><div id="msg"></div>
 <script>
+
+const $=id=>document.getElementById(id);
+async function api(path,body){const r=await fetch(path,body===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+ if(!r.ok)throw new Error(await r.text()||('HTTP '+r.status));return r}
+async function loadWifi(){
+ const j=await (await api('/api/wifi')).json();
+ $('wcur').innerHTML=j.connected?('Connected to <b></b> ('+j.ip+')'):'Not connected to Wi-Fi (setup mode, '+j.ip+')';
+ if(j.connected)$('wcur').querySelector('b').textContent=j.connected;
+ const t=$('wlist');t.innerHTML='';
+ j.networks.forEach((n,i)=>{
+  const tr=t.insertRow();tr.style.borderBottom='1px solid #333';
+  const c=tr.insertCell();c.style.padding='6px 0';c.textContent=(i+1)+'. '+n.ssid+(n.ssid===j.connected?'  (connected)':'');
+  const a=tr.insertCell();a.style.whiteSpace='nowrap';a.style.textAlign='right';
+  const mk=(txt,fn)=>{const b=document.createElement('button');b.type='button';b.textContent=txt;b.style.cssText='width:auto;margin:2px;padding:4px 8px';b.onclick=async()=>{try{await fn();loadWifi()}catch(e){alert(e.message)}};a.appendChild(b)};
+  if(i>0)mk('\u25B2',()=>api('/api/wifi/move',{ssid:n.ssid,dir:-1}));
+  if(i<j.networks.length-1)mk('\u25BC',()=>api('/api/wifi/move',{ssid:n.ssid,dir:1}));
+  mk('Password',async()=>{const p=prompt('New password for '+n.ssid+' (8 to 63 characters, empty = open network)');if(p===null)return;
+   if(!p&&!confirm('Save '+n.ssid+' as an open network (no password)?'))return;
+   await api('/api/wifi/save',{ssid:n.ssid,pass:p})});
+  mk('Use now',async()=>{if(!confirm('Switch to '+n.ssid+' and restart the device?'))return;await api('/api/wifi/use',{ssid:n.ssid});$('wcur').textContent='Restarting...'});
+  mk('Delete',async()=>{if(confirm('Forget '+n.ssid+'?'))await api('/api/wifi/delete',{ssid:n.ssid})});
+ });
+}
+$('wscan').onclick=async()=>{
+ $('wscanres').textContent='Scanning (takes a few seconds)...';
+ try{const l=await (await api('/api/wifi/scan')).json();const box=$('wscanres');box.innerHTML='';
+  if(!l.length)box.textContent='No networks found.';
+  l.forEach(n=>{const d=document.createElement('div');d.style.cssText='display:flex;justify-content:space-between;align-items:center;padding:4px 0';
+   const s=document.createElement('span');s.textContent=n.ssid+'  '+n.rssi+' dBm'+(n.open?'':'  (secured)')+(n.saved?'  (saved)':'');d.appendChild(s);
+   const b=document.createElement('button');b.type='button';b.style.cssText='width:auto;margin:0;padding:4px 10px';b.textContent=n.saved?'Update':'Add';
+   b.onclick=async()=>{let p='';if(!n.open){p=prompt('Password for '+n.ssid);if(p===null)return}
+    try{await api('/api/wifi/save',{ssid:n.ssid,pass:p});loadWifi();b.textContent='Saved'}catch(e){alert(e.message)}};
+   d.appendChild(b);box.appendChild(d)})}catch(e){$('wscanres').textContent='Scan failed: '+e.message}};
+$('wadd').onclick=async()=>{try{await api('/api/wifi/save',{ssid:$('wssid').value.trim(),pass:$('wpass').value});$('wssid').value='';$('wpass').value='';loadWifi()}catch(e){alert(e.message)}};
+loadWifi();
 const f=document.getElementById('f');
 fetch('/api/config').then(r=>r.json()).then(j=>{for(const k in j){const e=f.elements[k];if(!e)continue;if(e.type=='checkbox')e.checked=j[k];else e.value=j[k]}});
 f.onsubmit=async e=>{e.preventDefault();const o={};for(const el of f.elements){if(!el.name)continue;o[el.name]=el.type=='checkbox'?el.checked:el.type=='number'?+el.value:el.value}

@@ -1,6 +1,7 @@
 #include "ui.h"
 #include "display.h"
 #include "config.h"
+#include "menu.h"
 #include <ArduinoJson.h>
 #include <lvgl.h>
 #include <map>
@@ -96,6 +97,67 @@ static void touchCb(lv_indev_t*, lv_indev_data_t* data) {
   }
   data->point.x = tx;
   data->point.y = ty;
+}
+
+// --- status icons -----------------------------------------------------------------------------------------
+static const uint32_t C_OK = 0x2ED39A, C_WARN = 0xFFB300, C_BAD = 0xFF5252, C_OFF = 0x6B7480;
+static lv_obj_t* wifiIcon;
+static lv_obj_t* haPill;
+static lv_obj_t* haPillLabel;
+
+static void buildStatusIcons() {
+  lv_obj_t* scr = lv_screen_active();
+  wifiIcon = lv_label_create(scr);
+  lv_obj_set_style_text_font(wifiIcon, &lv_font_montserrat_24, 0);
+  lv_label_set_text(wifiIcon, LV_SYMBOL_WIFI);
+  lv_obj_set_pos(wifiIcon, 338, 288);
+  lv_obj_add_flag(wifiIcon, LV_OBJ_FLAG_CLICKABLE);  // tap the Wi-Fi icon to open the Wi-Fi settings
+  lv_obj_set_ext_click_area(wifiIcon, 10);
+  lv_obj_add_event_cb(wifiIcon, [](lv_event_t*) { menuOpen(true); }, LV_EVENT_CLICKED, nullptr);
+
+  // Outlined pill like a connection badge: colored border and text, transparent inside.
+  haPill = lv_obj_create(scr);
+  lv_obj_remove_style_all(haPill);
+  lv_obj_set_size(haPill, LV_SIZE_CONTENT, 28);
+  lv_obj_set_pos(haPill, 374, 286);
+  lv_obj_set_style_border_width(haPill, 2, 0);
+  lv_obj_set_style_radius(haPill, 8, 0);
+  lv_obj_set_style_pad_hor(haPill, 8, 0);
+  lv_obj_set_style_pad_ver(haPill, 2, 0);
+  haPillLabel = lv_label_create(haPill);
+  lv_obj_set_style_text_font(haPillLabel, &lv_font_montserrat_18, 0);
+  lv_label_set_text(haPillLabel, "HA");
+  uiSetWifiState(0, 0);
+  uiSetHaState(HA_NOT_CONFIGURED);
+}
+
+static void setColor(lv_obj_t* o, uint32_t c, bool border) {
+  if (border) lv_obj_set_style_border_color(o, lv_color_hex(c), 0);
+  else lv_obj_set_style_text_color(o, lv_color_hex(c), 0);
+}
+
+void uiSetWifiState(int state, int rssi) {
+  if (!wifiIcon) return;
+  uint32_t c = C_OFF;
+  if (state == 1 || state == 2) c = C_WARN;
+  else if (state == 3) c = rssi > -75 ? C_OK : C_WARN;  // weak signal shows amber
+  setColor(wifiIcon, c, false);
+}
+
+void uiSetHaState(HaState st) {
+  if (!haPill) return;
+  uint32_t c = C_OFF;
+  const char* txt = "HA";
+  switch (st) {
+    case HA_LOCAL: c = C_OK; break;
+    case HA_EXTERNAL: c = C_OK; txt = "HA ext"; break;  // connected through the external address
+    case HA_CONNECTING: c = C_WARN; break;
+    case HA_AUTH_ERROR: c = C_BAD; break;
+    default: break;
+  }
+  lv_label_set_text(haPillLabel, txt);
+  setColor(haPill, c, true);
+  setColor(haPillLabel, c, false);
 }
 
 static lv_obj_t* brightScrim;
@@ -206,13 +268,14 @@ void uiInit(ButtonHandler onPress, SliderHandler onSlide) {
   lv_obj_set_pos(canvasHolder, 0, 0);
   barHolder = lv_obj_create(scr);
   lv_obj_remove_style_all(barHolder);
-  lv_obj_set_size(barHolder, 430, 40);
+  lv_obj_set_size(barHolder, 320, 40);
   lv_obj_set_pos(barHolder, 0, UI_CANVAS_H);
   lv_obj_set_flex_flow(barHolder, LV_FLEX_FLOW_ROW);
   lv_obj_set_flex_align(barHolder, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
   lv_obj_set_style_pad_all(barHolder, 4, 0);
   lv_obj_set_style_pad_column(barHolder, 6, 0);
   statusLabel = nullptr;
+  buildStatusIcons();
   buildBrightnessPanel();
   uiSetBrightnessPct(cfg.brightnessPct, false);
 }
@@ -331,10 +394,10 @@ static void buildSlider(Widget& w, lv_obj_t* page, lv_color_t c, JsonObject b, i
   lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
   lv_obj_set_style_bg_color(card, lv_color_hex(0x23272B), 0);
   lv_obj_set_style_radius(card, 12, 0);
-  lv_obj_set_style_pad_all(card, 10, 0);
+  lv_obj_set_style_pad_all(card, 8, 0);
   lv_obj_remove_flag(card, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_t* cap = lv_label_create(card);
-  lv_obj_set_style_text_font(cap, &lv_font_montserrat_18, 0);
+  lv_obj_set_style_text_font(cap, &lv_font_montserrat_14, 0);
   lv_label_set_text(cap, w.label.c_str());
   lv_obj_align(cap, LV_ALIGN_TOP_LEFT, 0, 0);
   w.text = cap;
@@ -342,16 +405,16 @@ static void buildSlider(Widget& w, lv_obj_t* page, lv_color_t c, JsonObject b, i
   w.obj = sl;
   bool horizontal = bw >= bh;
   if (horizontal) {
-    lv_obj_set_size(sl, bw - 28, 18);
-    lv_obj_align(sl, LV_ALIGN_BOTTOM_MID, 0, -8);
+    lv_obj_set_size(sl, bw - 28, 12);
+    lv_obj_align(sl, LV_ALIGN_BOTTOM_MID, 0, -6);
   } else {
-    lv_obj_set_size(sl, 18, bh - 60);
-    lv_obj_align(sl, LV_ALIGN_BOTTOM_MID, 0, -8);
+    lv_obj_set_size(sl, 12, bh - 50);
+    lv_obj_align(sl, LV_ALIGN_BOTTOM_MID, 0, -6);
   }
   lv_slider_set_range(sl, mn * w.mul, mx * w.mul);
   lv_obj_set_style_bg_color(sl, c, LV_PART_INDICATOR);
   lv_obj_set_style_bg_color(sl, c, LV_PART_KNOB);
-  lv_obj_set_style_pad_all(sl, 8, LV_PART_KNOB);
+  lv_obj_set_style_pad_all(sl, 6, LV_PART_KNOB);
   if (w.entity.length()) {
     auto send = [](lv_event_t* e) {
       auto* cx = (Widget*)lv_event_get_user_data(e);
@@ -436,14 +499,6 @@ bool uiBuild(const String& layoutJson) {
       widgets.push_back(std::move(w));
     }
   }
-  if (multi) {
-    statusLabel = lv_label_create(barHolder);
-  } else {
-    statusLabel = lv_label_create(barHolder);
-  }
-  lv_obj_set_style_text_color(statusLabel, lv_color_hex(0xE8ECEF), 0);
-  lv_obj_set_style_text_font(statusLabel, &lv_font_montserrat_18, 0);
-  lv_label_set_text(statusLabel, statusText.c_str());
   if (!pages.empty()) showPage(0);
   return true;
 }
@@ -498,10 +553,8 @@ void uiSetBanner(const String& text) {
   }
 }
 
-void uiSetStatus(const String& text) {
-  statusText = text;
-  if (statusLabel) lv_label_set_text(statusLabel, text.c_str());
-}
+void uiSetStatus(const String& text) { statusText = text; }
+String uiStatusText() { return statusText; }
 
 std::vector<String> uiEntities() { return entityList; }
 

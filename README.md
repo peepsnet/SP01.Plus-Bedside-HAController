@@ -65,8 +65,24 @@ Caveats: the on-device GitHub update does not verify TLS certificates and images
 
 - **Buttons:** toggle, on, off, scene, script, press, cover open/close/stop, lock/unlock, media play/pause. Buttons light up when the entity is on/open/playing/unlocked/heating.
 - **Sliders** (add with "+ Add slider" in the editor): light brightness, light color temperature (Kelvin), cover position, fan speed, media volume, climate target temperature, `number` and `input_number`. Sliders follow the entity's live value and send while you drag (at most every 300 ms) and on release. Optional `min`/`max` override the defaults. RGB color wheels and HVAC mode pickers are not done yet.
+- **Slider with a button:** in the editor, a button's settings have a checkbox *Also show a slider for this entity*. It adds a linked slider under the button (brightness for lights, position for covers, and so on) that follows the button when you move it and is removed when you untick the box or delete the button.
 - **Entity picker:** the editor loads your devices from Home Assistant (lights, switches, covers, fans, climate, media players, scenes, scripts, helpers, locks, buttons) so you can pick them by name; typing an id still works. It needs the Home Assistant connection to be up.
 - **Local and external URL:** Settings has a local address (tried first) and an optional external address, for example a Nabu Casa or reverse-proxy name. If the local one does not authenticate within 12 s the device switches to the external one, and while on external it retries local every 5 minutes.
+
+## Touchscreen settings menu and status icons
+
+- **Gear (bottom right)** opens the settings menu with **Wi-Fi** and **About**.
+  - **Wi-Fi:** shows the current network and IP, plus the saved-network list. Tap a saved network to change its password, move it up/down in priority, join it now, or delete it. **Scan** lists nearby networks (tap one, type the password). **Add network** lets you type an SSID and password by hand for a network that is not in range. Save stores without connecting; Connect joins, and on success saves it as top priority and restarts.
+  - **About:** firmware version, IP, web address, web login, Home Assistant status, and **Check update** / **Install**.
+- **Status icons** replace the old status text: a Wi-Fi icon and an outlined **HA** badge (shows `HA ext` when connected through the external address). Green is connected, amber is connecting or weak signal, red is a rejected token, gray is not set up. Tap the Wi-Fi icon to open the Wi-Fi settings. Style borrowed from the SpoolmanScale display (outlined badge, mint green on dark).
+- *All of this is untested on the board; the keyboard layout in particular may need tuning.*
+
+## Wi-Fi networks
+
+- Multiple networks are saved in priority order (index 0 first). At boot the device scans and joins the highest-priority saved network that is visible, then tries hidden ones. If none join it opens the `Bedside-Setup` AP and keeps rescanning every 60 s, restarting when a saved network appears. If connected-mode Wi-Fi is lost for over 2 minutes it restarts.
+- The same management is on the web settings page (Wi-Fi networks section): scan, add (including out-of-range networks), edit password, reorder, delete, use now.
+- Saved passwords are never returned by the API (only a `has_pass` flag); a blank password on edit keeps the old one. Old single `wifi_ssid/wifi_pass` configs migrate automatically.
+- *Untested on hardware.* Scans block briefly, so the UI may pause for a moment.
 
 ## Touchscreen gestures and brightness
 

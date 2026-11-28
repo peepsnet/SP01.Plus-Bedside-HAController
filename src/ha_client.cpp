@@ -16,6 +16,7 @@ static uint32_t msgId = 1;
 static int endpoint = 0;  // 0 local, 1 external
 static uint32_t connectStart = 0;
 static uint32_t authedAt = 0;
+static bool authFailed = false;
 static constexpr uint32_t AUTH_TIMEOUT_MS = 12000;      // give up on an endpoint after this
 static constexpr uint32_t RETRY_LOCAL_MS = 5 * 60000;   // while on external, try local again this often
 
@@ -100,6 +101,7 @@ static void handlePickResult(const char* text) {
 
 static void startEndpoint(int ep) {
   endpoint = ep;
+  authFailed = false;
   ws.disconnect();
   authed = false;
   connectStart = millis();
@@ -111,7 +113,7 @@ static void startEndpoint(int ep) {
   else ws.begin(host.c_str(), port, "/api/websocket");
   ws.setReconnectInterval(5000);
   ws.enableHeartbeat(25000, 5000, 2);
-  if (statusCb) statusCb(String("HA connecting (") + (ext ? "external" : "local") + ")");
+  if (statusCb) statusCb(String("connecting (") + (ext ? "external" : "local") + ")");
 }
 
 static void handleLevels(const String& entity, JsonObject a, const String& state, HaLevels& lv) {
@@ -160,13 +162,15 @@ static void handleMessage(const char* payload, size_t len) {
     sendJson(a);
   } else if (type == "auth_ok") {
     authed = true;
+    authFailed = false;
     authedAt = millis();
-    if (statusCb) statusCb(String("HA connected (") + (endpoint ? "external" : "local") + ")");
+    if (statusCb) statusCb(String("connected (") + (endpoint ? "external" : "local") + ")");
     subscribe();
     haRefreshEntities();
   } else if (type == "auth_invalid") {
     authed = false;
-    if (statusCb) statusCb("HA token rejected");
+    authFailed = true;
+    if (statusCb) statusCb("token rejected");
   } else if (type == "event") {
     JsonObject ev = d["event"];
     if (tplId && (uint32_t)(d["id"] | 0) == tplId) {  // render_template result for the entity picker
@@ -183,7 +187,7 @@ static void handleMessage(const char* payload, size_t len) {
 static void onWs(WStype_t t, uint8_t* p, size_t len) {
   switch (t) {
     case WStype_CONNECTED:
-      if (statusCb) statusCb("HA socket open");
+      if (statusCb) statusCb("socket open");
       break;
     case WStype_DISCONNECTED:
       authed = false;
@@ -208,7 +212,7 @@ void haReconnect() {
   authed = false;
   if ((!hasLocal() && !hasExternal()) || cfg.haToken.isEmpty()) {
     connectStart = 0;
-    if (statusCb) statusCb("HA not configured");
+    if (statusCb) statusCb("not configured");
     return;
   }
   startEndpoint(hasLocal() ? 0 : 1);
@@ -234,6 +238,11 @@ void haSetEntities(const std::vector<String>& ids) {
 }
 
 bool haConnected() { return authed; }
+HaState haState() {
+  if (connectStart == 0) return HA_NOT_CONFIGURED;
+  if (authed) return endpoint ? HA_EXTERNAL : HA_LOCAL;
+  return authFailed ? HA_AUTH_ERROR : HA_CONNECTING;
+}
 String haEndpointName() { return !authed ? "" : (endpoint ? "external" : "local"); }
 const std::vector<std::pair<String, String>>& haEntities() { return entityCache; }
 bool haEntitiesLoading() { return loadingEntities; }
