@@ -379,6 +379,16 @@ static void refreshWidget(Widget& w, const EntityInfo& e) {
   lv_label_set_text(w.text, t.c_str());
 }
 
+// Button labels use the largest of 18/16/14/12 px that fits the button width on one line; if even 12 px is too wide, the
+// text wraps to two lines (one if the button is short) and is cut with "..." instead of running over the edge.
+static const lv_font_t* fitFont(const String& s, int avail, bool& fits) {
+  const lv_font_t* fs[] = {&lv_font_montserrat_18, &lv_font_montserrat_16, &lv_font_montserrat_14, &lv_font_montserrat_12};
+  for (auto* f : fs)
+    if (lv_text_get_width(s.c_str(), s.length(), f, 0) <= avail) { fits = true; return f; }
+  fits = false;
+  return fs[3];
+}
+
 static void buildButton(Widget& w, lv_obj_t* page, lv_color_t c, JsonObject b, int x, int y, int bw, int bh) {
   lv_obj_t* btn = lv_button_create(page);
   w.obj = btn;
@@ -396,7 +406,17 @@ static void buildButton(Widget& w, lv_obj_t* page, lv_color_t c, JsonObject b, i
     lv_label_set_text(ic, sym);
   }
   lv_obj_t* lb = lv_label_create(btn);
-  lv_obj_set_style_text_font(lb, &lv_font_montserrat_18, 0);
+  lv_obj_set_style_pad_hor(btn, 6, 0);  // fixed side padding so the fit below is exact
+  const int avail = bw - 12;
+  bool fits;
+  lv_obj_set_style_text_font(lb, fitFont(w.label, avail, fits), 0);
+  if (!fits) {  // too long even at 12 px: wrap to two lines when the button is tall enough, then cut with "..."
+    const lv_font_t* f = fitFont(w.label, avail, fits);
+    int lines = bh >= 60 ? 2 : 1;
+    lv_obj_set_size(lb, avail, lines * lv_font_get_line_height(f));
+    lv_label_set_long_mode(lb, LV_LABEL_LONG_DOT);
+    lv_obj_set_style_text_align(lb, LV_TEXT_ALIGN_CENTER, 0);
+  }
   lv_label_set_text(lb, w.label.c_str());
   w.text = lb;
   if (w.camera) {
@@ -437,16 +457,16 @@ static void buildSlider(Widget& w, lv_obj_t* page, lv_color_t c, JsonObject b, i
   w.obj = sl;
   bool horizontal = bw >= bh;
   if (horizontal) {
-    lv_obj_set_size(sl, bw - 28, 12);
+    lv_obj_set_size(sl, bw - 28, 10);
     lv_obj_align(sl, LV_ALIGN_BOTTOM_MID, 0, -6);
   } else {
-    lv_obj_set_size(sl, 12, bh - 50);
+    lv_obj_set_size(sl, 10, bh - 50);
     lv_obj_align(sl, LV_ALIGN_BOTTOM_MID, 0, -6);
   }
   lv_slider_set_range(sl, mn * w.mul, mx * w.mul);
   lv_obj_set_style_bg_color(sl, c, LV_PART_INDICATOR);
   lv_obj_set_style_bg_color(sl, c, LV_PART_KNOB);
-  lv_obj_set_style_pad_all(sl, 6, LV_PART_KNOB);
+  lv_obj_set_style_pad_all(sl, 5, LV_PART_KNOB);
   if (w.entity.length()) {
     auto send = [](lv_event_t* e) {
       auto* cx = (Widget*)lv_event_get_user_data(e);

@@ -125,6 +125,14 @@ const ICON_SVG={
  charge:'<svg viewBox="0 0 24 24"><path d="M13 2L4 14h6l-2 8 10-13h-6z"/></svg>',
  image:'<svg viewBox="0 0 24 24"><path d="M2 4h20v16H2zm2 2v9l4-4 4 4 3-3 5 5V6zm12 3a2 2 0 1 0 0-.1z" fill-rule="evenodd"/></svg>',
  video:'<svg viewBox="0 0 24 24"><path d="M2 5h14v14H2zM18 9.500L22 7v10l-4-2.500z"/></svg>'};
+// Same rule as the device: the largest of 18/16/14/12 px whose text fits the button width less 12 px of padding; at 12 px
+// the text is cut with an ellipsis. Measured with the browser's font, so it can differ by a few pixels from the device.
+const mctx=document.createElement('canvas').getContext('2d');
+function fitPx(txt,avail){for(const px of [18,16,14,12]){mctx.font='500 '+px+'px Montserrat,"Segoe UI",system-ui,sans-serif';if(mctx.measureText(txt).width<=avail)return px}return 12}
+// When even 12 px does not fit on one line the label wraps to 2 lines (1 if the button is under 60 px tall) and is cut with an ellipsis.
+function wrapLbl(t,b){mctx.font='500 12px Montserrat,"Segoe UI",system-ui,sans-serif';
+ const long=mctx.measureText(t.textContent).width>b.w-12;
+ t.style.cssText+=long?`;white-space:normal;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:${b.h>=60?2:1};line-clamp:${b.h>=60?2:1};overflow:hidden;width:${(b.w-12)*S}px;line-height:${14*S}px;max-height:${(b.h>=60?2:1)*14*S}px`:''}
 function draw(){
  $('tabs').innerHTML='';
  L.pages.forEach((p,i)=>{const t=document.createElement('button');t.className='tab'+(i==pi?' on':'');t.textContent=p.name;t.onclick=()=>{pi=i;sel=null;draw()};$('tabs').appendChild(t)});
@@ -141,24 +149,25 @@ function draw(){
    d.style.padding=8*S+'px';
    const t=document.createElement('span');t.className='lbl';t.style.fontSize=14*S+'px';
    t.textContent=(b.label?b.label+'  ':'')+'50%';d.appendChild(t);
-   // track (unfilled part), filled part up to 50 %, and the 24 px knob, like the LVGL slider
-   const col=b.color||'#4A90E2',hz=b.w>=b.h;
+   // track (unfilled part), filled part up to 50 %, and the 20 px knob, like the LVGL slider (10 px track)
+   const col=b.color||'#4A90E2',hz=b.w>=b.h,TR=10,KN=20;
    const bar=document.createElement('i');bar.style.background='rgba(255,255,255,.18)';bar.style.borderRadius='999px';
    const fill=document.createElement('i');fill.style.cssText=`background:${col};border-radius:999px`;
-   const knob=document.createElement('i');knob.style.cssText=`background:${col};border-radius:50%;width:${24*S}px;height:${24*S}px;box-shadow:0 0 0 ${1*S}px #0003`;
+   const knob=document.createElement('i');knob.style.cssText=`background:${col};border-radius:50%;width:${KN*S}px;height:${KN*S}px;box-shadow:0 0 0 ${1*S}px #0003`;
    if(hz){const L0=14*S,len=(b.w-28)*S;
-    bar.style.cssText+=`left:${L0}px;width:${len}px;bottom:${14*S}px;height:${12*S}px`;
-    fill.style.cssText+=`;left:${L0}px;width:${len/2}px;bottom:${14*S}px;height:${12*S}px`;
-    knob.style.left=(L0+len/2-12*S)+'px';knob.style.bottom=(8*S)+'px'}
+    bar.style.cssText+=`left:${L0}px;width:${len}px;bottom:${14*S}px;height:${TR*S}px`;
+    fill.style.cssText+=`;left:${L0}px;width:${len/2}px;bottom:${14*S}px;height:${TR*S}px`;
+    knob.style.left=(L0+len/2-KN/2*S)+'px';knob.style.bottom=((14+TR/2-KN/2)*S)+'px'}
    else{const len=Math.max(0,b.h-50)*S;
-    bar.style.cssText+=`left:calc(50% - ${6*S}px);bottom:${14*S}px;width:${12*S}px;height:${len}px`;
-    fill.style.cssText+=`;left:calc(50% - ${6*S}px);bottom:${14*S}px;width:${12*S}px;height:${len/2}px`;
-    knob.style.left=`calc(50% - ${12*S}px)`;knob.style.bottom=(14*S+len/2-12*S)+'px'}
+    bar.style.cssText+=`left:calc(50% - ${TR/2*S}px);bottom:${14*S}px;width:${TR*S}px;height:${len}px`;
+    fill.style.cssText+=`;left:calc(50% - ${TR/2*S}px);bottom:${14*S}px;width:${TR*S}px;height:${len/2}px`;
+    knob.style.left=`calc(50% - ${KN/2*S}px)`;knob.style.bottom=(14*S+len/2-KN/2*S)+'px'}
    d.appendChild(bar);d.appendChild(fill);d.appendChild(knob);
   }else{
+   d.style.padding='0 '+6*S+'px';
    const ic=ICON_SVG[b.icon||(b.type=='camera'?'video':'')];
    if(ic){const s=document.createElement('span');s.innerHTML=ic;const v=s.firstChild;v.setAttribute('width',24*S);v.setAttribute('height',24*S);s.style.cssText='display:flex;max-width:none';d.appendChild(s)}
-   const t=document.createElement('span');t.className='lbl'+(b.label?'':' ent');t.style.fontSize=18*S+'px';t.textContent=b.label||b.entity_id||'';d.appendChild(t);
+   const t=document.createElement('span');t.className='lbl'+(b.label?'':' ent');t.style.fontSize=fitPx(b.label||b.entity_id||'',b.w-12)*S+'px';t.textContent=b.label||b.entity_id||'';d.appendChild(t);wrapLbl(t,b);
   }
   d.onpointerdown=e=>{sel=i;drag(e,b,'move');showProps();markSel()};
   const h=document.createElement('div');h.className='h';h.onpointerdown=e=>{e.stopPropagation();sel=i;drag(e,b,'size')};
@@ -173,7 +182,7 @@ function drag(e,b,mode){
   if(mode=='move'){b.x=Math.max(0,Math.min(W-b.w,ox+dx));b.y=Math.max(0,Math.min(H-b.h,oy+dy))}
   else{b.w=Math.max(2*G,Math.min(W-b.x,ow+dx));b.h=Math.max(2*G,Math.min(H-b.y,oh+dy))}
   el.style.left=b.x*S+'px';el.style.top=b.y*S+'px';el.style.width=b.w*S+'px';el.style.height=b.h*S+'px';cellInfo(b);lk.forEach((i,n)=>{const t=bs[i];t.x=Math.max(0,Math.min(W-t.w,lo[n][0]+b.x-ox));t.y=Math.max(0,Math.min(H-t.h,lo[n][1]+b.y-oy));const e=$('canvas').children[i];e.style.left=t.x*S+'px';e.style.top=t.y*S+'px'})};
- const up=()=>{removeEventListener('pointermove',mv);removeEventListener('pointerup',up)};
+ const up=()=>{removeEventListener('pointermove',mv);removeEventListener('pointerup',up);if(mode=='size')draw()};
  addEventListener('pointermove',mv);addEventListener('pointerup',up);
 }
 const FIELDS=['label','icon','entity_id','action','color','attr','min','max','url'];
@@ -228,7 +237,7 @@ for(const k of FIELDS)$(k).oninput=()=>{
  const b=L.pages[pi].buttons[sel];
  if((k=='min'||k=='max')){if($(k).value==='')delete b[k];else b[k]=+$(k).value}else b[k]=$(k).value;
  const d=$('canvas').children[sel];
- if(k=='label'||k=='entity_id'){const l=d.querySelector('.lbl');if(l){l.textContent=b.type=='slider'?(b.label?b.label+'  ':'')+'50%':(b.label||b.entity_id||'');l.classList.toggle('ent',!b.label&&b.type!='slider')}}
+ if(k=='label'||k=='entity_id'){const l=d.querySelector('.lbl');if(l){l.textContent=b.type=='slider'?(b.label?b.label+'  ':'')+'50%':(b.label||b.entity_id||'');if(b.type!='slider'){l.style.fontSize=fitPx(l.textContent,b.w-12)*S+'px';wrapLbl(l,b)}l.classList.toggle('ent',!b.label&&b.type!='slider')}}
  if(k=='icon'){draw();return}
  if(b.type!='slider'&&b.type!='camera'){syncLinked(b,k);if(k=='entity_id')updateSliderBox(b)}
  if(k=='color'){draw();return}};
