@@ -3,6 +3,7 @@
 #include "config.h"
 #include "camera.h"
 #include "menu.h"
+#include "fan_icon.h"
 #include <ArduinoJson.h>
 #include <lvgl.h>
 #include <map>
@@ -333,6 +334,7 @@ static const char* iconSymbol(const String& n) {
   if (n == "charge") return LV_SYMBOL_CHARGE;
   if (n == "image") return LV_SYMBOL_IMAGE;
   if (n == "video") return LV_SYMBOL_VIDEO;
+  // "fan" is drawn from a bitmap (fan_icon.h), see buildButton
   return nullptr;
 }
 
@@ -379,18 +381,58 @@ static void refreshWidget(Widget& w, const EntityInfo& e) {
   if (w.text) lv_label_set_text(w.text, t.c_str());  // a slider built into a button has no caption
 }
 
-// Button labels use the largest of 18/16/14/12 px that fits the button width on one line; if even 12 px is too wide, the
-// text wraps to two lines (one if the button is short) and is cut with "..." instead of running over the edge.
-static const lv_font_t* fitFont(const String& s, int avail, bool& fits) {
-  const lv_font_t* fs[] = {&lv_font_montserrat_18, &lv_font_montserrat_16, &lv_font_montserrat_14, &lv_font_montserrat_12};
-  for (auto* f : fs)
-    if (lv_text_get_width(s.c_str(), s.length(), f, 0) <= avail) { fits = true; return f; }
-  fits = false;
-  return fs[3];
+// ---- Fitting a button's contents --------------------------------------------------------------------------------------
+// Everything inside a button scales down to fit, whatever its size. Maximums are the original sizes: label 18 px, icon 24 px,
+// slider track 10 px. The web preview (web_pages.h, btnLayout) uses the very same rules; keep the two in step.
+//  1. The label takes the largest of 18/16/14/12 px that fits the width on one line; at 12 px it wraps to 2 lines (cut with "...").
+//  2. If label + icon are too tall, the icon shrinks first (24/18/14/12), then the label font, then the label drops to 1 line.
+//  3. Only as a last resort the icon is left out.
+//  4. A slider built into the button takes the bottom third of the button (18 to 34 px) and its track/knob shrink with it.
+static const lv_font_t* const LBL_FONT[4] = {&lv_font_montserrat_18, &lv_font_montserrat_16, &lv_font_montserrat_14, &lv_font_montserrat_12};
+static const lv_font_t* const ICON_FONT[4] = {&lv_font_montserrat_24, &lv_font_montserrat_18, &lv_font_montserrat_14, &lv_font_montserrat_12};
+static const lv_image_dsc_t* const FAN_ICON[4] = {&fanIcon24, &fanIcon18, &fanIcon14, &fanIcon12};
+static const int ICON_PX[4] = {24, 18, 14, 12};
+
+static int sliderArea(int bh) { return std::max(18, std::min(34, bh / 3)); }
+static int trackPx(int area) { return area >= 30 ? 10 : (area >= 24 ? 8 : 6); }
+
+struct BtnFit {
+  int lbl = 3;   // index into LBL_FONT
+  int lines = 1;
+  int icon = -1; // index into ICON_*, -1 = no icon
+};
+
+// area: height available for icon + label; hasIcon/label as set on the button.
+static BtnFit fitButton(const String& label, int bw, int area, bool hasIcon) {
+  BtnFit r;
+  const int avail = bw - 12;
+  int first = 3;
+  bool fitsWidth = false;
+  for (int i = 0; i < 4; i++)
+    if (lv_text_get_width(label.c_str(), label.length(), LBL_FONT[i], 0) <= avail) { first = i; fitsWidth = true; break; }
+  const int room = area - 4;
+  if (!label.length()) {  // icon only: the largest that fits
+    for (int k = 0; hasIcon && k < 4; k++)
+      if (ICON_PX[k] <= room && ICON_PX[k] <= bw - 8) { r.icon = k; break; }
+    return r;
+  }
+  for (int i = first; i < 4; i++) {
+    const bool one = fitsWidth || i < 3 ? lv_text_get_width(label.c_str(), label.length(), LBL_FONT[i], 0) <= avail : false;
+    const int lines = one ? 1 : 2;
+    const int lh = lv_font_get_line_height(LBL_FONT[i]) * lines;
+    for (int k = 0; hasIcon && k < 4; k++) {
+      if (ICON_PX[k] > bw - 8) continue;
+      if (lh + lv_font_get_line_height(ICON_FONT[k]) + 2 <= room) { r.lbl = i; r.lines = lines; r.icon = k; return r; }
+    }
+    if (!hasIcon && lh <= room) { r.lbl = i; r.lines = lines; return r; }
+  }
+  r.lbl = 3;  // last resort: smallest text on one line, no icon
+  r.lines = 1;
+  r.icon = -1;
+  return r;
 }
 
-// ws: the button has a slider built in at the bottom (JSON "with_slider"): one element, SL_AREA px taller.
-static constexpr int SL_AREA = 34;
+// ws: the button has a slider built in at the bottom (JSON "with_slider"): one element, the button is taller to hold it.
 static void buildButton(Widget& w, lv_obj_t* page, lv_color_t c, JsonObject b, int x, int y, int bw, int bh, bool ws) {
   lv_obj_t* btn = lv_button_create(page);
   w.obj = btn;
@@ -399,34 +441,36 @@ static void buildButton(Widget& w, lv_obj_t* page, lv_color_t c, JsonObject b, i
   lv_obj_set_style_radius(btn, 12, 0);
   lv_obj_set_style_bg_color(btn, lv_color_darken(c, 180), 0);  // off
   lv_obj_set_style_bg_color(btn, c, LV_STATE_CHECKED);         // on
-  lv_obj_t* host = btn;  // where the icon and label go
-  if (ws) {              // icon and label sit in the top part, the slider in the bottom SL_AREA px of the same button
-    lv_obj_set_style_pad_all(btn, 0, 0);
-    host = lv_obj_create(btn);
-    lv_obj_remove_style_all(host);
-    lv_obj_set_size(host, bw, bh - SL_AREA);
-    lv_obj_remove_flag(host, LV_OBJ_FLAG_CLICKABLE);  // touches fall through to the button
-    lv_obj_remove_flag(host, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_style_pad_hor(host, 6, 0);
-  } else {
-    lv_obj_set_style_pad_hor(btn, 6, 0);  // fixed side padding so the label fit below is exact
-  }
+  const int sa = ws ? sliderArea(bh) : 0;
+  lv_obj_set_style_pad_all(btn, 0, 0);
+  lv_obj_t* host = lv_obj_create(btn);  // icon and label sit in the top part, the slider (if any) in the bottom sa px
+  lv_obj_remove_style_all(host);
+  lv_obj_set_size(host, bw, bh - sa);
+  lv_obj_remove_flag(host, LV_OBJ_FLAG_CLICKABLE);  // touches fall through to the button
+  lv_obj_remove_flag(host, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_style_pad_hor(host, 6, 0);
   lv_obj_set_flex_flow(host, LV_FLEX_FLOW_COLUMN);
   lv_obj_set_flex_align(host, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-  const char* sym = iconSymbol(String(b["icon"] | ""));
-  if (sym) {
-    lv_obj_t* ic = lv_label_create(host);
-    lv_obj_set_style_text_font(ic, &lv_font_montserrat_24, 0);
-    lv_label_set_text(ic, sym);
+  const String iconName = String(b["icon"] | "");
+  const bool fan = iconName == "fan";
+  const char* sym = fan ? nullptr : iconSymbol(iconName);
+  const BtnFit f = fitButton(w.label, bw, bh - sa, fan || sym);
+  if (f.icon >= 0) {
+    if (fan) {
+      lv_obj_t* im = lv_image_create(host);
+      lv_image_set_src(im, FAN_ICON[f.icon]);
+      lv_obj_set_style_image_recolor(im, lv_color_white(), 0);
+      lv_obj_set_style_image_recolor_opa(im, LV_OPA_COVER, 0);
+    } else {
+      lv_obj_t* ic = lv_label_create(host);
+      lv_obj_set_style_text_font(ic, ICON_FONT[f.icon], 0);
+      lv_label_set_text(ic, sym);
+    }
   }
   lv_obj_t* lb = lv_label_create(host);
-  const int avail = bw - 12;
-  bool fits;
-  lv_obj_set_style_text_font(lb, fitFont(w.label, avail, fits), 0);
-  if (!fits) {  // too long even at 12 px: wrap to two lines when the button is tall enough, then cut with "..."
-    const lv_font_t* f = fitFont(w.label, avail, fits);
-    int lines = (bh - (ws ? SL_AREA : 0)) >= 60 ? 2 : 1;
-    lv_obj_set_size(lb, avail, lines * lv_font_get_line_height(f));
+  lv_obj_set_style_text_font(lb, LBL_FONT[f.lbl], 0);
+  if (f.lines > 1 || lv_text_get_width(w.label.c_str(), w.label.length(), LBL_FONT[f.lbl], 0) > bw - 12) {
+    lv_obj_set_size(lb, bw - 12, f.lines * lv_font_get_line_height(LBL_FONT[f.lbl]));  // wrap, then cut with "..."
     lv_label_set_long_mode(lb, LV_LABEL_LONG_DOT);
     lv_obj_set_style_text_align(lb, LV_TEXT_ALIGN_CENTER, 0);
   }
@@ -473,21 +517,23 @@ static void wireSlider(Widget& w, lv_obj_t* sl) {
   }, LV_EVENT_VALUE_CHANGED, &w);
 }
 
-// The slider inside a button: white knob and fill on a darkened track so it reads on any button color.
-static void buildInlineSlider(Widget& sw, lv_obj_t* btn, JsonObject b, int bw) {
+// The slider inside a button: white knob and fill on a darkened track so it reads on any button color. Sized from the button.
+static void buildInlineSlider(Widget& sw, lv_obj_t* btn, JsonObject b, int bw, int bh) {
   sw.attr = String(b["slider_attr"] | "");
   int mn, mx;
   sliderSpec(sw, b, mn, mx);
+  const int area = sliderArea(bh), tr = trackPx(area);
+  const int margin = std::max(tr + 1, std::min(14, bw / 6));
   lv_obj_t* sl = lv_slider_create(btn);
   sw.obj = sl;
-  lv_obj_set_size(sl, bw - 28, 10);
-  lv_obj_align(sl, LV_ALIGN_BOTTOM_MID, 0, -10);
+  lv_obj_set_size(sl, bw - 2 * margin, tr);
+  lv_obj_align(sl, LV_ALIGN_BOTTOM_MID, 0, -std::max(2, (area - tr) / 2 - 2));
   lv_slider_set_range(sl, mn * sw.mul, mx * sw.mul);
   lv_obj_set_style_bg_color(sl, lv_color_black(), LV_PART_MAIN);
   lv_obj_set_style_bg_opa(sl, LV_OPA_30, LV_PART_MAIN);
   lv_obj_set_style_bg_color(sl, lv_color_white(), LV_PART_INDICATOR);
   lv_obj_set_style_bg_color(sl, lv_color_white(), LV_PART_KNOB);
-  lv_obj_set_style_pad_all(sl, 5, LV_PART_KNOB);
+  lv_obj_set_style_pad_all(sl, tr / 2, LV_PART_KNOB);
   wireSlider(sw, sl);
 }
 
@@ -600,7 +646,7 @@ bool uiBuild(const String& layoutJson) {
       const char* hex = b["color"] | "#4A90E2";
       lv_color_t c = lv_color_hex(strtoul(hex[0] == '#' ? hex + 1 : hex, nullptr, 16));
       int bx = b["x"] | 0, by = b["y"] | 0, bw = b["w"] | 100, bh = b["h"] | 70;
-      const bool ws = !w->slider && !w->camera && (b["with_slider"] | false) && w->entity.length() && bh > SL_AREA + 30;
+      const bool ws = !w->slider && !w->camera && (b["with_slider"] | false) && w->entity.length() && bh >= 40 && bw >= 40;
 
       if (w->slider) buildSlider(*w, page, c, b, bx, by, bw, bh);
       else buildButton(*w, page, c, b, bx, by, bw, bh, ws);
@@ -616,7 +662,7 @@ bool uiBuild(const String& layoutJson) {
         auto sw = std::unique_ptr<Widget>(new Widget());
         sw->slider = true;
         sw->entity = w->entity;
-        buildInlineSlider(*sw, w->obj, b, bw);
+        buildInlineSlider(*sw, w->obj, b, bw, bh);
         byEntity[sw->entity].push_back(sw.get());
         auto it = known.find(sw->entity);
         if (it != known.end()) refreshWidget(*sw, it->second);

@@ -2,6 +2,8 @@
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <lvgl.h>
+#include <algorithm>
+#include <cmath>
 #include "config.h"
 #include "display.h"
 #include "ha_client.h"
@@ -11,8 +13,8 @@
 // Untested on hardware. A background task (core 0) downloads and JPEG-decodes frames into one of two PSRAM sprites; the
 // main loop swaps the newest finished one into an LVGL image. LVGL itself is only touched from the main loop.
 //
-// Frames are decoded at 1, 1/2, 1/4 or 1/8 size (the JPEG decoder's fast paths) so the picture fits the screen without
-// resampling. A 640x480 camera therefore shows as 320x240, centered. Progressive JPEGs are not supported.
+// Frames are scaled while decoding so the picture is as large as possible on the screen with its aspect ratio kept
+// (letterboxed). A 640x480 camera on the landscape screen shows at 427x320. Progressive JPEGs are not supported.
 
 static constexpr size_t JPG_MAX = 262144;
 
@@ -150,10 +152,13 @@ static bool decodeFrame(const uint8_t* jpg, size_t n) {
   int r = jpegSize(jpg, n, w, h);
   if (r < 0) { setStatus("Progressive JPEG is not supported"); return false; }
   if (r == 0 || w <= 0 || h <= 0) return false;
-  int div = 1;
-  while ((w / div > uiW() || h / div > uiH()) && div < 8) div *= 2;
-  int dw = w / div, dh = h / div;
+  // The picture is scaled to be as large as possible on the screen with its aspect ratio kept (black bars fill the rest).
+  // LovyanGFX's JPEG decoder does the scaling while decoding: it uses the decoder's own 1/2, 1/4, 1/8 reduction for the
+  // bulk of a big reduction and a cheap nearest-pixel resample for the remainder (no resample at all when the factor is
+  // exactly 1, 1/2, 1/4 or 1/8). The sprite is sized from the first frame; later frames that differ are fitted inside it.
   if (!spr[0]) {
+    float z0 = std::min((float)uiW() / w, (float)uiH() / h);
+    int dw = std::max(2, ((int)(w * z0)) & ~1), dh = std::max(2, (int)(h * z0));  // even width: pixels are swapped in pairs
     for (int i = 0; i < 2; i++) {
       spr[i] = new lgfx::LGFX_Sprite();
       spr[i]->setPsram(true);
@@ -163,10 +168,12 @@ static bool decodeFrame(const uint8_t* jpg, size_t n) {
     frameW = dw;
     frameH = dh;
   }
-  if (dw > frameW || dh > frameH) { setStatus("Camera changed resolution; reopen"); return false; }
+  float z = std::min((float)frameW / w, (float)frameH / h);
+  if (fabsf(z - 1.0f) < 0.01f) z = 1.0f;
+  int sw = (int)(w * z), sh = (int)(h * z);
   int back = 1 - frontIdx;
   spr[back]->fillScreen(0);
-  if (!spr[back]->drawJpg(jpg, n, 0, 0, frameW, frameH, 0, 0, 1.0f / div, 1.0f / div)) return false;
+  if (!spr[back]->drawJpg(jpg, n, (frameW - sw) / 2, (frameH - sh) / 2, sw, sh, 0, 0, z, z)) return false;
   // The sprite stores big-endian RGB565, LVGL wants little-endian: swap the bytes of every pixel.
   uint32_t* q = (uint32_t*)spr[back]->getBuffer();
   size_t cnt = ((size_t)frameW * frameH) / 2;
