@@ -3,6 +3,7 @@
 #include "web_pages.h"
 #include <ArduinoJson.h>
 #include <Update.h>
+#include <WiFi.h>
 #include <WebServer.h>
 #include "version.h"
 #include "ha_client.h"
@@ -41,7 +42,6 @@ void webBegin(std::function<bool(const String&)> onLayout) {
   server.on("/api/config", HTTP_GET, [] {
     AUTH();
     JsonDocument d;
-    d["wifi_ssid"] = cfg.wifiSsid;
     d["ha_host"] = cfg.haHost;
     d["ha_port"] = cfg.haPort;
     d["ha_tls"] = cfg.haTls;
@@ -62,9 +62,8 @@ void webBegin(std::function<bool(const String&)> onLayout) {
       server.send(400, "text/plain", "bad json");
       return;
     }
-    cfg.wifiSsid = d["wifi_ssid"] | cfg.wifiSsid;
-    String pw = d["wifi_pass"] | "";
-    if (pw.length()) cfg.wifiPass = pw;
+    String legacySsid = d["wifi_ssid"] | "";  // older clients: still accepted, saved as the top network
+    if (!legacySsid.isEmpty()) wifiSave(legacySsid, String(d["wifi_pass"] | ""), true, true);
     cfg.haHost = d["ha_host"] | cfg.haHost;
     cfg.haPort = d["ha_port"] | cfg.haPort;
     cfg.haTls = d["ha_tls"] | cfg.haTls;
@@ -84,6 +83,83 @@ void webBegin(std::function<bool(const String&)> onLayout) {
     delay(500);
     ESP.restart();
   });
+  // ---- Wi-Fi networks. Saved passwords are write-only: they are never returned to the browser. ----
+  server.on("/api/wifi", HTTP_GET, [] {
+    AUTH();
+    JsonDocument d;
+    bool sta = WiFi.status() == WL_CONNECTED;
+    d["connected"] = sta ? WiFi.SSID() : String("");
+    d["ip"] = sta ? WiFi.localIP().toString() : WiFi.softAPIP().toString();
+    JsonArray a = d["networks"].to<JsonArray>();
+    for (auto& n : wifiNets) {
+      JsonObject o = a.add<JsonObject>();
+      o["ssid"] = n.ssid;
+      o["has_pass"] = !n.pass.isEmpty();
+    }
+    String out;
+    serializeJson(d, out);
+    server.send(200, "application/json", out);
+  });
+  server.on("/api/wifi/scan", HTTP_GET, [] {
+    AUTH();
+    if (WiFi.getMode() == WIFI_AP) WiFi.mode(WIFI_AP_STA);
+    int n = WiFi.scanNetworks();
+    JsonDocument d;
+    JsonArray a = d.to<JsonArray>();
+    for (int i = 0; i < n && a.size() < 25; i++) {  // results come strongest first
+      String ssid = WiFi.SSID(i);
+      bool dup = false;
+      for (JsonObject o : a) if (o["ssid"] == ssid) dup = true;
+      if (ssid.isEmpty() || dup) continue;
+      JsonObject o = a.add<JsonObject>();
+      o["ssid"] = ssid;
+      o["rssi"] = WiFi.RSSI(i);
+      o["open"] = WiFi.encryptionType(i) == WIFI_AUTH_OPEN;
+      o["saved"] = wifiIndexOf(ssid) >= 0;
+    }
+    WiFi.scanDelete();
+    String out;
+    serializeJson(d, out);
+    server.send(200, "application/json", out);
+  });
+  // body: {ssid, pass?, first?}. Adds a network (even one that is out of range right now) or changes its password.
+  server.on("/api/wifi/save", HTTP_POST, [] {
+    AUTH();
+    JsonDocument d;
+    if (deserializeJson(d, server.arg("plain"))) return server.send(400, "text/plain", "bad json");
+    String ssid = d["ssid"] | "", pass = d["pass"] | "";
+    if (ssid.isEmpty() || ssid.length() > 32) return server.send(400, "text/plain", "SSID must be 1 to 32 characters");
+    if (!pass.isEmpty() && (pass.length() < 8 || pass.length() > 63))
+      return server.send(400, "text/plain", "Password must be 8 to 63 characters (or empty for an open network)");
+    wifiSave(ssid, pass, d["first"] | false, true);
+    server.send(200, "text/plain", "ok");
+  });
+  server.on("/api/wifi/delete", HTTP_POST, [] {
+    AUTH();
+    JsonDocument d;
+    if (deserializeJson(d, server.arg("plain"))) return server.send(400, "text/plain", "bad json");
+    server.send(wifiRemove(String(d["ssid"] | "")) ? 200 : 404, "text/plain", "");
+  });
+  server.on("/api/wifi/move", HTTP_POST, [] {  // body: {ssid, dir: -1 | 1}
+    AUTH();
+    JsonDocument d;
+    if (deserializeJson(d, server.arg("plain"))) return server.send(400, "text/plain", "bad json");
+    server.send(wifiMove(String(d["ssid"] | ""), (int)(d["dir"] | 0)) ? 200 : 400, "text/plain", "");
+  });
+  // Make a saved network the top priority and restart so the device joins it now.
+  server.on("/api/wifi/use", HTTP_POST, [] {
+    AUTH();
+    JsonDocument d;
+    if (deserializeJson(d, server.arg("plain"))) return server.send(400, "text/plain", "bad json");
+    String ssid = d["ssid"] | "";
+    int i = wifiIndexOf(ssid);
+    if (i < 0) return server.send(404, "text/plain", "not saved");
+    wifiSave(ssid, "", true, true);
+    server.send(200, "text/plain", "restarting");
+    delay(500);
+    ESP.restart();
+  });
+
   // Entity list for the editor's picker. ?refresh=1 reloads it from Home Assistant.
   server.on("/api/entities", HTTP_GET, [] {
     AUTH();

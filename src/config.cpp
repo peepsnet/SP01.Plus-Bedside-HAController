@@ -3,6 +3,46 @@
 #include <LittleFS.h>
 
 Config cfg;
+std::vector<WifiNet> wifiNets;
+
+int wifiIndexOf(const String& ssid) {
+  for (size_t i = 0; i < wifiNets.size(); i++)
+    if (wifiNets[i].ssid == ssid) return (int)i;
+  return -1;
+}
+
+void wifiSave(const String& ssid, const String& pass, bool first, bool keepOldPass) {
+  if (ssid.isEmpty()) return;
+  int i = wifiIndexOf(ssid);
+  if (i >= 0) {
+    if (!(keepOldPass && pass.isEmpty())) wifiNets[i].pass = pass;
+  } else {
+    wifiNets.push_back({ssid, pass});
+    i = wifiNets.size() - 1;
+  }
+  if (first && i > 0) {
+    WifiNet n = wifiNets[i];
+    wifiNets.erase(wifiNets.begin() + i);
+    wifiNets.insert(wifiNets.begin(), n);
+  }
+  configSave();
+}
+
+bool wifiRemove(const String& ssid) {
+  int i = wifiIndexOf(ssid);
+  if (i < 0) return false;
+  wifiNets.erase(wifiNets.begin() + i);
+  configSave();
+  return true;
+}
+
+bool wifiMove(const String& ssid, int delta) {
+  int i = wifiIndexOf(ssid), j = i + delta;
+  if (i < 0 || j < 0 || j >= (int)wifiNets.size()) return false;
+  std::swap(wifiNets[i], wifiNets[j]);
+  configSave();
+  return true;
+}
 
 const char* DEFAULT_LAYOUT = R"JSON({
   "pages": [
@@ -29,8 +69,14 @@ bool configLoad() {
   if (!f) return false;
   JsonDocument d;
   if (deserializeJson(d, f)) return false;
-  cfg.wifiSsid = d["wifi_ssid"] | "";
-  cfg.wifiPass = d["wifi_pass"] | "";
+  wifiNets.clear();
+  for (JsonObject n : d["wifi"].as<JsonArray>()) {
+    String ssid = n["ssid"] | "";
+    if (!ssid.isEmpty()) wifiNets.push_back({ssid, String(n["pass"] | "")});
+  }
+  // Older single-network files (and data/config.example.json) use wifi_ssid / wifi_pass.
+  String legacy = d["wifi_ssid"] | "";
+  if (!legacy.isEmpty() && wifiIndexOf(legacy) < 0) wifiNets.push_back({legacy, String(d["wifi_pass"] | "")});
   cfg.haHost = d["ha_host"] | "";
   cfg.haPort = d["ha_port"] | 8123;
   cfg.haTls = d["ha_tls"] | false;
@@ -49,8 +95,12 @@ bool configLoad() {
 
 bool configSave() {
   JsonDocument d;
-  d["wifi_ssid"] = cfg.wifiSsid;
-  d["wifi_pass"] = cfg.wifiPass;
+  JsonArray w = d["wifi"].to<JsonArray>();
+  for (auto& n : wifiNets) {
+    JsonObject o = w.add<JsonObject>();
+    o["ssid"] = n.ssid;
+    o["pass"] = n.pass;
+  }
   d["ha_host"] = cfg.haHost;
   d["ha_port"] = cfg.haPort;
   d["ha_tls"] = cfg.haTls;

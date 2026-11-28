@@ -62,9 +62,7 @@ void handleWifi(const uint8_t* d, size_t len) {
     sendState(S_READY);
     return;
   }
-  cfg.wifiSsid = ssid;
-  cfg.wifiPass = pass;
-  configSave();
+  wifiSave(ssid, pass, true);  // newly provisioned network becomes the top priority
   sendState(S_PROVISIONED);
   sendResult(C_WIFI, {"http://" + WiFi.localIP().toString() + "/"});
   delay(1500);

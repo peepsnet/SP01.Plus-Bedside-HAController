@@ -180,9 +180,18 @@ static const char SETTINGS_HTML[] PROGMEM = R"HTML(<!doctype html>
 label{display:block;margin:10px 0 3px;color:#9aa}input,button{width:100%;box-sizing:border-box;padding:8px;background:#23262a;color:#eee;border:1px solid #444;border-radius:6px}
 a{color:#7ab}</style></head><body>
 <h3>Settings &nbsp; <small><a href="/">Layout</a> &middot; <a href="/update">Update</a></small></h3>
+<h4>Wi-Fi networks</h4>
+<div id="wcur"><small>Loading...</small></div>
+<table id="wlist" style="width:100%;border-collapse:collapse"></table>
+<button id="wscan" type="button">Scan for networks</button>
+<div id="wscanres"></div>
+<label style="margin-top:14px">Add a network manually (it can be out of range right now)</label>
+<input id="wssid" placeholder="Network name (SSID)" autocomplete="off">
+<input id="wpass" type="password" placeholder="Password (empty for an open network)" style="margin-top:6px" autocomplete="new-password">
+<button id="wadd" type="button" style="margin-top:6px">Save network</button>
+<small>The device joins the saved network with the highest priority that is in range. Saved passwords are never shown; use "Password" to replace one.</small>
+<hr style="margin:18px 0">
 <form id="f">
-<label>Wi-Fi SSID</label><input name="wifi_ssid">
-<label>Wi-Fi password (leave blank to keep)</label><input name="wifi_pass" type="password">
 <h4>Home Assistant, local address (tried first)</h4>
 <label>Host</label><input name="ha_host" placeholder="homeassistant.local or 192.168.1.10">
 <label>Port</label><input name="ha_port" type="number" value="8123">
@@ -198,6 +207,41 @@ a{color:#7ab}</style></head><body>
 <button type="submit" style="margin-top:14px;background:#2d7a3e">Save &amp; restart</button>
 </form><div id="msg"></div>
 <script>
+
+const $=id=>document.getElementById(id);
+async function api(path,body){const r=await fetch(path,body===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+ if(!r.ok)throw new Error(await r.text()||('HTTP '+r.status));return r}
+async function loadWifi(){
+ const j=await (await api('/api/wifi')).json();
+ $('wcur').innerHTML=j.connected?('Connected to <b></b> ('+j.ip+')'):'Not connected to Wi-Fi (setup mode, '+j.ip+')';
+ if(j.connected)$('wcur').querySelector('b').textContent=j.connected;
+ const t=$('wlist');t.innerHTML='';
+ j.networks.forEach((n,i)=>{
+  const tr=t.insertRow();tr.style.borderBottom='1px solid #333';
+  const c=tr.insertCell();c.style.padding='6px 0';c.textContent=(i+1)+'. '+n.ssid+(n.ssid===j.connected?'  (connected)':'');
+  const a=tr.insertCell();a.style.whiteSpace='nowrap';a.style.textAlign='right';
+  const mk=(txt,fn)=>{const b=document.createElement('button');b.type='button';b.textContent=txt;b.style.cssText='width:auto;margin:2px;padding:4px 8px';b.onclick=async()=>{try{await fn();loadWifi()}catch(e){alert(e.message)}};a.appendChild(b)};
+  if(i>0)mk('\u25B2',()=>api('/api/wifi/move',{ssid:n.ssid,dir:-1}));
+  if(i<j.networks.length-1)mk('\u25BC',()=>api('/api/wifi/move',{ssid:n.ssid,dir:1}));
+  mk('Password',async()=>{const p=prompt('New password for '+n.ssid+' (8 to 63 characters, empty = open network)');if(p===null)return;
+   if(!p&&!confirm('Save '+n.ssid+' as an open network (no password)?'))return;
+   await api('/api/wifi/save',{ssid:n.ssid,pass:p})});
+  mk('Use now',async()=>{if(!confirm('Switch to '+n.ssid+' and restart the device?'))return;await api('/api/wifi/use',{ssid:n.ssid});$('wcur').textContent='Restarting...'});
+  mk('Delete',async()=>{if(confirm('Forget '+n.ssid+'?'))await api('/api/wifi/delete',{ssid:n.ssid})});
+ });
+}
+$('wscan').onclick=async()=>{
+ $('wscanres').textContent='Scanning (takes a few seconds)...';
+ try{const l=await (await api('/api/wifi/scan')).json();const box=$('wscanres');box.innerHTML='';
+  if(!l.length)box.textContent='No networks found.';
+  l.forEach(n=>{const d=document.createElement('div');d.style.cssText='display:flex;justify-content:space-between;align-items:center;padding:4px 0';
+   const s=document.createElement('span');s.textContent=n.ssid+'  '+n.rssi+' dBm'+(n.open?'':'  (secured)')+(n.saved?'  (saved)':'');d.appendChild(s);
+   const b=document.createElement('button');b.type='button';b.style.cssText='width:auto;margin:0;padding:4px 10px';b.textContent=n.saved?'Update':'Add';
+   b.onclick=async()=>{let p='';if(!n.open){p=prompt('Password for '+n.ssid);if(p===null)return}
+    try{await api('/api/wifi/save',{ssid:n.ssid,pass:p});loadWifi();b.textContent='Saved'}catch(e){alert(e.message)}};
+   d.appendChild(b);box.appendChild(d)})}catch(e){$('wscanres').textContent='Scan failed: '+e.message}};
+$('wadd').onclick=async()=>{try{await api('/api/wifi/save',{ssid:$('wssid').value.trim(),pass:$('wpass').value});$('wssid').value='';$('wpass').value='';loadWifi()}catch(e){alert(e.message)}};
+loadWifi();
 const f=document.getElementById('f');
 fetch('/api/config').then(r=>r.json()).then(j=>{for(const k in j){const e=f.elements[k];if(!e)continue;if(e.type=='checkbox')e.checked=j[k];else e.value=j[k]}});
 f.onsubmit=async e=>{e.preventDefault();const o={};for(const el of f.elements){if(!el.name)continue;o[el.name]=el.type=='checkbox'?el.checked:el.type=='number'?+el.value:el.value}

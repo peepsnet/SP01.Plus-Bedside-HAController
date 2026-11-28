@@ -72,10 +72,17 @@ Caveats: the on-device GitHub update does not verify TLS certificates and images
 ## Touchscreen settings menu and status icons
 
 - **Gear (bottom right)** opens the settings menu with **Wi-Fi** and **About**.
-  - **Wi-Fi:** shows the current network, signal and IP. **Join network** scans, lets you pick a network and type the password on an on-screen keyboard (open networks join directly); on success it saves and restarts. **Forget** clears the saved network and restarts into setup mode.
+  - **Wi-Fi:** shows the current network and IP, plus the saved-network list. Tap a saved network to change its password, move it up/down in priority, join it now, or delete it. **Scan** lists nearby networks (tap one, type the password). **Add network** lets you type an SSID and password by hand for a network that is not in range. Save stores without connecting; Connect joins, and on success saves it as top priority and restarts.
   - **About:** firmware version, IP, web address, web login, Home Assistant status, and **Check update** / **Install**.
 - **Status icons** replace the old status text: a Wi-Fi icon and an outlined **HA** badge (shows `HA ext` when connected through the external address). Green is connected, amber is connecting or weak signal, red is a rejected token, gray is not set up. Tap the Wi-Fi icon to open the Wi-Fi settings. Style borrowed from the SpoolmanScale display (outlined badge, mint green on dark).
 - *All of this is untested on the board; the keyboard layout in particular may need tuning.*
+
+## Wi-Fi networks
+
+- Multiple networks are saved in priority order (index 0 first). At boot the device scans and joins the highest-priority saved network that is visible, then tries hidden ones. If none join it opens the `Bedside-Setup` AP and keeps rescanning every 60 s, restarting when a saved network appears. If connected-mode Wi-Fi is lost for over 2 minutes it restarts.
+- The same management is on the web settings page (Wi-Fi networks section): scan, add (including out-of-range networks), edit password, reorder, delete, use now.
+- Saved passwords are never returned by the API (only a `has_pass` flag); a blank password on edit keeps the old one. Old single `wifi_ssid/wifi_pass` configs migrate automatically.
+- *Untested on hardware.* Scans block briefly, so the UI may pause for a moment.
 
 ## Touchscreen gestures and brightness
 

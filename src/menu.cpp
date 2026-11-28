@@ -11,9 +11,14 @@ static lv_obj_t* panel;
 static lv_obj_t* scrMain;
 static lv_obj_t* scrWifi;
 static lv_obj_t* scrScan;
+static lv_obj_t* scrNet;
 static lv_obj_t* scrPass;
 static lv_obj_t* scrAbout;
 static lv_obj_t* wifiInfo;
+static lv_obj_t* wifiList;
+static lv_obj_t* netTitle;
+static lv_obj_t* netInfo;
+static lv_obj_t* ssidArea;
 static lv_obj_t* scanList;
 static lv_obj_t* scanNote;
 static lv_obj_t* passTitle;
@@ -25,6 +30,9 @@ static lv_obj_t* aboutMsg;
 static lv_obj_t* installBtn;
 
 static String chosenSsid;
+static int selNet = -1;  // saved network shown on the detail screen
+enum PassMode { PM_JOIN, PM_EDIT, PM_MANUAL };
+static PassMode passMode = PM_JOIN;
 struct Net { String ssid; bool open; int rssi; };
 static Net nets[20];
 static int netCount = 0;
@@ -32,7 +40,7 @@ static int netCount = 0;
 static const lv_color_t WHITE = lv_color_hex(0xFFFFFF);
 
 static void showScreen(lv_obj_t* s) {
-  lv_obj_t* all[] = {scrMain, scrWifi, scrScan, scrPass, scrAbout};
+  lv_obj_t* all[] = {scrMain, scrWifi, scrNet, scrScan, scrPass, scrAbout};
   for (auto* o : all) lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
   lv_obj_remove_flag(s, LV_OBJ_FLAG_HIDDEN);
 }
@@ -90,18 +98,54 @@ static String ipText() {
 }
 
 // --- Wi-Fi screen -----------------------------------------------------------------------------
+static void refreshNetDetail();
+
 static void refreshWifi() {
   String t;
-  bool sta = WiFi.status() == WL_CONNECTED;
-  if (sta) {
-    t = String("Network: ") + WiFi.SSID() + "\nStatus: connected, " + WiFi.RSSI() + " dBm\nIP: " + WiFi.localIP().toString();
-  } else if (WiFi.getMode() == WIFI_AP || WiFi.getMode() == WIFI_AP_STA) {
-    t = String("Not connected.\nSetup network: Bedside-Setup\nIP: ") + WiFi.softAPIP().toString();
-  } else {
-    t = "Not connected.";
-  }
-  t += String("\nSaved network: ") + (cfg.wifiSsid.isEmpty() ? "(none)" : cfg.wifiSsid);
+  if (WiFi.status() == WL_CONNECTED)
+    t = String("Connected: ") + WiFi.SSID() + "  (" + WiFi.RSSI() + " dBm)\nIP: " + WiFi.localIP().toString();
+  else
+    t = String("Not connected.  Setup network: Bedside-Setup\nIP: ") + WiFi.softAPIP().toString();
   lv_label_set_text(wifiInfo, t.c_str());
+  lv_obj_clean(wifiList);
+  if (wifiNets.empty()) {
+    lv_obj_t* l = lv_list_add_text(wifiList, "No saved networks. Tap Add network.");
+    lv_obj_set_style_text_color(l, WHITE, 0);
+  }
+  for (size_t i = 0; i < wifiNets.size(); i++) {
+    bool cur = WiFi.status() == WL_CONNECTED && WiFi.SSID() == wifiNets[i].ssid;
+    String label = String((int)i + 1) + ".  " + wifiNets[i].ssid + (cur ? "   (connected)" : "");
+    lv_obj_t* b = lv_list_add_button(wifiList, cur ? LV_SYMBOL_OK : LV_SYMBOL_WIFI, label.c_str());
+    lv_obj_set_style_text_color(b, WHITE, 0);
+    lv_obj_set_style_bg_color(b, lv_color_hex(0x1F2933), 0);
+    lv_obj_add_event_cb(b, [](lv_event_t* e) {
+      selNet = (int)(intptr_t)lv_event_get_user_data(e);
+      refreshNetDetail();
+      showScreen(scrNet);
+    }, LV_EVENT_CLICKED, (void*)(intptr_t)i);
+  }
+}
+
+static void refreshNetDetail() {
+  if (selNet < 0 || selNet >= (int)wifiNets.size()) return;
+  lv_label_set_text(netTitle, wifiNets[selNet].ssid.c_str());
+  String t = String("Priority ") + (selNet + 1) + " of " + wifiNets.size() +
+             "\nPassword: " + (wifiNets[selNet].pass.isEmpty() ? "none (open network)" : "saved (hidden)");
+  lv_label_set_text(netInfo, t.c_str());
+}
+
+// Opens the password form. PM_JOIN: picked from a scan. PM_EDIT: change a saved password. PM_MANUAL: type the name too.
+static void openPassForm(PassMode m, const String& ssid) {
+  passMode = m;
+  chosenSsid = ssid;
+  lv_textarea_set_text(ssidArea, ssid.c_str());
+  if (m == PM_MANUAL) lv_obj_remove_state(ssidArea, LV_STATE_DISABLED);
+  else lv_obj_add_state(ssidArea, LV_STATE_DISABLED);
+  lv_textarea_set_text(passArea, "");
+  lv_label_set_text(passMsg, "");
+  lv_label_set_text(passTitle, m == PM_MANUAL ? "Add network" : (m == PM_EDIT ? "New password" : "Join network"));
+  lv_keyboard_set_textarea(kb, m == PM_MANUAL ? ssidArea : passArea);
+  showScreen(scrPass);
 }
 
 static void doScan() {
@@ -134,11 +178,7 @@ static void doScan() {
         extern void menuConnect(const String&, const String&, lv_obj_t*);
         menuConnect(chosenSsid, "", scanNote);
       } else {
-        String t = String("Password for ") + chosenSsid;
-        lv_label_set_text(passTitle, t.c_str());
-        lv_textarea_set_text(passArea, "");
-        lv_label_set_text(passMsg, "");
-        showScreen(scrPass);
+        openPassForm(PM_JOIN, chosenSsid);
       }
     }, LV_EVENT_CLICKED, (void*)(intptr_t)i);
   }
@@ -154,15 +194,13 @@ void menuConnect(const String& ssid, const String& pass, lv_obj_t* msg) {
   uint32_t t = millis();
   while (WiFi.status() != WL_CONNECTED && millis() - t < 15000) delay(100);
   if (WiFi.status() == WL_CONNECTED) {
-    cfg.wifiSsid = ssid;
-    cfg.wifiPass = pass;
-    configSave();
+    wifiSave(ssid, pass, true);  // joined networks become the top priority
     say(msg, "Connected. Restarting...");
     delay(1200);
     ESP.restart();
   }
   WiFi.disconnect();
-  if (!cfg.wifiSsid.isEmpty()) WiFi.begin(cfg.wifiSsid.c_str(), cfg.wifiPass.c_str());  // back to the old network
+  if (!wifiNets.empty()) WiFi.begin(wifiNets[0].ssid.c_str(), wifiNets[0].pass.c_str());  // back to the best saved network
   say(msg, "Could not connect. Check the password and try again.");
 }
 
@@ -216,12 +254,13 @@ void menuInit() {
 
   scrMain = mkScreen();
   scrWifi = mkScreen();
+  scrNet = mkScreen();
   scrScan = mkScreen();
   scrPass = mkScreen();
   scrAbout = mkScreen();
 
   // Content is inset 14 px from the screen edge.
-  for (auto* s : {scrMain, scrWifi, scrScan, scrAbout}) {
+  for (auto* s : {scrMain, scrWifi, scrNet, scrScan, scrAbout}) {
     lv_obj_set_style_pad_all(s, 14, 0);
   }
 
@@ -238,16 +277,44 @@ void menuInit() {
 
   // ---- wifi ----
   mkTitle(scrWifi, "Wi-Fi");
-  wifiInfo = mkLabel(scrWifi, 0, 40, 440, &lv_font_montserrat_18, WHITE);
-  lv_obj_set_style_text_line_space(wifiInfo, 6, 0);
-  mkBtn(scrWifi, "Join network", [](lv_event_t*) { showScreen(scrScan); doScan(); }, 0, 244, 150);
-  mkBtn(scrWifi, "Forget", [](lv_event_t*) {
-    cfg.wifiSsid = "";
-    cfg.wifiPass = "";
-    configSave();
-    ESP.restart();  // comes back up in setup mode
-  }, 158, 244, 110, 44, 0xC62828);
-  mkBtn(scrWifi, "Back", [](lv_event_t*) { showScreen(scrMain); }, 276, 244, 100, 44, 0x455A64);
+  wifiInfo = mkLabel(scrWifi, 0, 32, 440, &lv_font_montserrat_14, WHITE);
+  lv_obj_set_style_text_line_space(wifiInfo, 4, 0);
+  lv_obj_t* hdr = mkLabel(scrWifi, 0, 70, 440, &lv_font_montserrat_14, lv_color_hex(0xFFD54F));
+  lv_label_set_text(hdr, "Saved networks (highest priority first). Tap one to edit.");
+  wifiList = lv_list_create(scrWifi);
+  lv_obj_set_size(wifiList, 452, 120);
+  lv_obj_set_pos(wifiList, 0, 90);
+  lv_obj_set_style_bg_color(wifiList, lv_color_hex(0x11161B), 0);
+  lv_obj_set_style_border_width(wifiList, 0, 0);
+  mkBtn(scrWifi, "Scan", [](lv_event_t*) { showScreen(scrScan); doScan(); }, 0, 244, 100);
+  mkBtn(scrWifi, "Add network", [](lv_event_t*) { openPassForm(PM_MANUAL, ""); }, 108, 244, 170);
+  mkBtn(scrWifi, "Back", [](lv_event_t*) { showScreen(scrMain); }, 286, 244, 100, 44, 0x455A64);
+
+  // ---- saved network detail ----
+  netTitle = mkTitle(scrNet, "Network");
+  netInfo = mkLabel(scrNet, 0, 40, 440, &lv_font_montserrat_18, WHITE);
+  lv_obj_set_style_text_line_space(netInfo, 6, 0);
+  mkBtn(scrNet, "New password", [](lv_event_t*) {
+    if (selNet >= 0 && selNet < (int)wifiNets.size()) openPassForm(PM_EDIT, wifiNets[selNet].ssid);
+  }, 0, 110, 210);
+  mkBtn(scrNet, "Use now", [](lv_event_t*) {
+    if (selNet < 0 || selNet >= (int)wifiNets.size()) return;
+    wifiSave(wifiNets[selNet].ssid, "", true, true);
+    ESP.restart();  // joins the top-priority network
+  }, 218, 110, 218, 44, 0x2E7D32);
+  mkBtn(scrNet, "Priority up", [](lv_event_t*) {
+    if (selNet > 0 && wifiMove(wifiNets[selNet].ssid, -1)) { selNet--; refreshNetDetail(); }
+  }, 0, 162, 210);
+  mkBtn(scrNet, "Priority down", [](lv_event_t*) {
+    if (selNet >= 0 && selNet + 1 < (int)wifiNets.size() && wifiMove(wifiNets[selNet].ssid, 1)) { selNet++; refreshNetDetail(); }
+  }, 218, 162, 218);
+  mkBtn(scrNet, "Delete", [](lv_event_t*) {
+    if (selNet >= 0 && selNet < (int)wifiNets.size()) wifiRemove(wifiNets[selNet].ssid);
+    selNet = -1;
+    refreshWifi();
+    showScreen(scrWifi);
+  }, 0, 244, 130, 44, 0xC62828);
+  mkBtn(scrNet, "Back", [](lv_event_t*) { refreshWifi(); showScreen(scrWifi); }, 138, 244, 100, 44, 0x455A64);
 
   // ---- scan ----
   mkTitle(scrScan, "Choose network");
@@ -258,30 +325,63 @@ void menuInit() {
   lv_obj_set_style_bg_color(scanList, lv_color_hex(0x11161B), 0);
   lv_obj_set_style_border_width(scanList, 0, 0);
   mkBtn(scrScan, "Rescan", [](lv_event_t*) { doScan(); }, 0, 244, 120);
-  mkBtn(scrScan, "Back", [](lv_event_t*) { refreshWifi(); showScreen(scrWifi); }, 128, 244, 100, 44, 0x455A64);
+  mkBtn(scrScan, "Add manually", [](lv_event_t*) { openPassForm(PM_MANUAL, ""); }, 128, 244, 190);
+  mkBtn(scrScan, "Back", [](lv_event_t*) { refreshWifi(); showScreen(scrWifi); }, 326, 244, 100, 44, 0x455A64);
 
-  // ---- password ----
-  passTitle = mkTitle(scrPass, "Password");
-  lv_obj_set_pos(passTitle, 14, 4);
+  // ---- password / manual entry form ----
+  passTitle = mkTitle(scrPass, "Join network");
+  lv_obj_set_pos(passTitle, 14, 2);
+  ssidArea = lv_textarea_create(scrPass);
+  lv_obj_set_size(ssidArea, 452, 38);
+  lv_obj_set_pos(ssidArea, 14, 34);
+  lv_textarea_set_one_line(ssidArea, true);
+  lv_textarea_set_placeholder_text(ssidArea, "Network name (SSID)");
+  lv_obj_set_style_text_color(ssidArea, lv_color_hex(0x101214), 0);  // dark text on the light input box
   passArea = lv_textarea_create(scrPass);
-  lv_obj_set_size(passArea, 452, 44);
-  lv_obj_set_pos(passArea, 14, 38);
+  lv_obj_set_size(passArea, 452, 38);
+  lv_obj_set_pos(passArea, 14, 76);
   lv_textarea_set_one_line(passArea, true);
   lv_textarea_set_password_mode(passArea, true);
-  lv_textarea_set_placeholder_text(passArea, "Wi-Fi password");
-  lv_obj_set_style_text_font(passArea, &lv_font_montserrat_18, 0);
-  lv_obj_set_style_text_color(passArea, lv_color_hex(0x101214), 0);  // dark text on the light input box
-  passMsg = mkLabel(scrPass, 226, 92, 250, &lv_font_montserrat_14, lv_color_hex(0xFFD54F));
-  mkBtn(scrPass, "Cancel", [](lv_event_t*) { showScreen(scrScan); }, 14, 90, 96, 36, 0x455A64);
+  lv_textarea_set_placeholder_text(passArea, "Password (empty = open network)");
+  lv_obj_set_style_text_color(passArea, lv_color_hex(0x101214), 0);
+  passMsg = mkLabel(scrPass, 14, 154, 452, &lv_font_montserrat_14, lv_color_hex(0xFFD54F));
+  lv_obj_set_pos(passMsg, 300, 124);
+  lv_obj_set_width(passMsg, 176);
+  mkBtn(scrPass, "Cancel", [](lv_event_t*) {
+    if (passMode == PM_EDIT) { refreshNetDetail(); showScreen(scrNet); }
+    else { refreshWifi(); showScreen(scrWifi); }
+  }, 14, 118, 84, 34, 0x455A64);
   mkBtn(scrPass, "Show", [](lv_event_t*) {
     lv_textarea_set_password_mode(passArea, !lv_textarea_get_password_mode(passArea));
-  }, 118, 90, 80, 36, 0x455A64);
+  }, 104, 118, 70, 34, 0x455A64);
+  mkBtn(scrPass, "Save", [](lv_event_t*) {
+    String ssid = passMode == PM_MANUAL ? String(lv_textarea_get_text(ssidArea)) : chosenSsid;
+    String pass = String(lv_textarea_get_text(passArea));
+    ssid.trim();
+    if (ssid.isEmpty() || ssid.length() > 32) { lv_label_set_text(passMsg, "Enter a network name."); return; }
+    if (!pass.isEmpty() && pass.length() < 8) { lv_label_set_text(passMsg, "Password needs 8+ characters."); return; }
+    wifiSave(ssid, pass, false);
+    refreshWifi();
+    showScreen(scrWifi);
+  }, 180, 118, 56, 34, 0x2E7D32);
+  mkBtn(scrPass, "Connect", [](lv_event_t*) {
+    String ssid = passMode == PM_MANUAL ? String(lv_textarea_get_text(ssidArea)) : chosenSsid;
+    ssid.trim();
+    if (ssid.isEmpty()) { lv_label_set_text(passMsg, "Enter a network name."); return; }
+    menuConnect(ssid, String(lv_textarea_get_text(passArea)), passMsg);
+  }, 242, 118, 52, 34, 0x1976D2);
   kb = lv_keyboard_create(scrPass);
-  lv_obj_set_size(kb, 480, 188);
+  lv_obj_set_size(kb, 480, 162);
   lv_obj_align(kb, LV_ALIGN_BOTTOM_MID, 0, 0);
   lv_keyboard_set_textarea(kb, passArea);
+  // Tapping a text box sends the keyboard to it.
+  for (lv_obj_t* ta : {ssidArea, passArea})
+    lv_obj_add_event_cb(ta, [](lv_event_t* e) { lv_keyboard_set_textarea(kb, (lv_obj_t*)lv_event_get_target(e)); },
+                        LV_EVENT_CLICKED, nullptr);
   lv_obj_add_event_cb(kb, [](lv_event_t*) {  // the keyboard's own OK key
-    menuConnect(chosenSsid, String(lv_textarea_get_text(passArea)), passMsg);
+    String ssid = passMode == PM_MANUAL ? String(lv_textarea_get_text(ssidArea)) : chosenSsid;
+    ssid.trim();
+    if (!ssid.isEmpty()) menuConnect(ssid, String(lv_textarea_get_text(passArea)), passMsg);
   }, LV_EVENT_READY, nullptr);
 
   // ---- about ----
