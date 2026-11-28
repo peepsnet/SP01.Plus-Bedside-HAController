@@ -116,6 +116,8 @@ Sizes and positions are shown and editable in **grid cells** (1 cell = 20 px, so
 
 The editor preview draws each button with its icon and the device text sizes (icon 24 px, label 18 px, slider caption 14 px, 12 px slider track with knob, all scaled with the preview), so it looks like the screen apart from the font (the device uses Montserrat, the preview uses it only if installed) and the icon shapes (look-alikes of the built-in LVGL symbols). It is the device screen area scaled to fit the browser: one grid cell is always the same size for the grid and every element, at any browser width, and elements are clipped to (and on load moved inside) the screen area. Device and editor both use the same pixel coordinates (origin at the top left of the 480 x 280 canvas).
 
+Button labels shrink to fit: the device (and the preview) uses the largest of 18, 16, 14 or 12 px that fits the button width on one line; if 12 px is still too long the text wraps to two lines (one line on buttons under 60 px tall) and ends in `...`. Sliders have a 10 px track and a 20 px knob.
+
 ## layout.json
 
 ```json
