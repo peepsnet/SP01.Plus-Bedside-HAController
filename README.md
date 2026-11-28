@@ -56,7 +56,7 @@ Flashing the `-ota.bin` (app-only) image at `0x0` leaves the board in a boot loo
 
 The 16 MB partition table (`default_16MB.csv`) has two app slots, so updates are OTA-safe.
 
-- **Web:** `http://bedside.local/update`, choose the `-ota.bin`, upload. The device reboots.
+- **Web:** `http://bedside.local/update` (linked from the layout editor and Settings pages). Either **Check for a new version** and **Install** the latest GitHub release (live progress, the same as the touchscreen), or choose a `-ota.bin` file and upload it. The device reboots.
 - **Touchscreen:** gear, **Check update** (asks GitHub for the latest release), then **Install** downloads that release's `-ota.bin` and flashes it.
 - **Progress:** every install (web upload or GitHub download) shows a full-screen card on the device with the phase (looking up, downloading/writing with a percent bar, verifying, rebooting) and any error with a Close button. The `/update` page shows upload percent, verifying, installed, then waits for the device to come back and shows the new version. Use the `-ota.bin`, not `-full.bin`.
 
@@ -78,9 +78,13 @@ Caveats: the on-device GitHub update does not verify TLS certificates and images
 - **Status icons** replace the old status text: a Wi-Fi icon and an outlined **HA** badge (shows `HA ext` when connected through the external address). Green is connected, amber is connecting or weak signal, red is a rejected token, gray is not set up. Tap the Wi-Fi icon to open the Wi-Fi settings. Style borrowed from the SpoolmanScale display (outlined badge, mint green on dark). The icons are small and sit just left of the gear.
 - *All of this is untested on the board; the keyboard layout in particular may need tuning.*
 
+## Reboot and factory reset
+
+At the bottom of the web Settings page: **Reboot device** restarts and keeps everything. **Factory reset** erases saved Wi-Fi networks, the HA token and addresses, the web password and both layouts, then restarts into setup mode. It asks twice: a confirm dialog, then you must type `RESET`. A new web password is generated and shown on the screen (gear, About).
+
 ## Screen rotation
 
-Gear, **Display** (or `Settings` on the web) rotates the screen: 0 (default landscape), 90 clockwise, 180, or 90 counter-clockwise. The device restarts to apply it and the touch panel follows. Landscape (0 and 180) uses the normal layout. Portrait (90 and 270) is 320 x 480 and has its **own layout** (the editor has a Landscape/Portrait switch, canvas 320 x 440). Until you save a portrait layout, the landscape one is squeezed to 2/3 of its width. *Untested on hardware: if 90 and 270 come out swapped, change `1 + cfg.rotation` to `1 - cfg.rotation` in `uiInit` (`src/ui.cpp`). The settings screens in portrait are compressed to fit and may look cramped.* If a rotation leaves the touch panel unusable, set it back at `http://bedside.local/settings`.
+Gear, **Display** (or `Settings` on the web) rotates the screen: 0 (default landscape), 90 clockwise, 180, or 90 counter-clockwise. The device restarts to apply it and the touch panel follows. Landscape (0 and 180) uses the normal layout. Portrait (90 and 270) is 320 x 480 and has its **own layout** (the editor has a Landscape/Portrait switch, canvas 320 x 440). Until you save a portrait layout, the landscape one is squeezed to 2/3 of its width. *Untested on hardware: if 90 and 270 come out swapped, change `1 + cfg.rotation` to `1 - cfg.rotation` in `uiInit` (`src/ui.cpp`). The settings screens in portrait are compressed to fit and may look cramped.* If a rotation leaves the touch panel unusable, set it back at `http://bedside.local/settings`. The layout editor also has a rotate control; its Landscape/Portrait selector only chooses which layout you are editing and does not turn the screen. The boot log prints the rotation setting and panel size.
 
 ## Camera button
 

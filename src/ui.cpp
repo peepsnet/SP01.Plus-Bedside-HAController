@@ -122,7 +122,8 @@ static void buildStatusIcons() {
   lv_obj_set_size(box, LV_SIZE_CONTENT, 24);
   lv_obj_align(box, LV_ALIGN_BOTTOM_RIGHT, -54, -8);
   lv_obj_set_flex_flow(box, LV_FLEX_FLOW_ROW);
-  lv_obj_set_flex_align(box, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+  // START, not END: with a content-sized box, END packing pushes the first icon outside the box where it is clipped away.
+  lv_obj_set_flex_align(box, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
   lv_obj_set_style_pad_column(box, 8, 0);
   lv_obj_remove_flag(box, LV_OBJ_FLAG_SCROLLABLE);
 
@@ -267,6 +268,7 @@ void uiInit(ButtonHandler onPress, SliderHandler onSlide) {
   tft.setRotation((1 + cfg.rotation) & 3);
   scrW = tft.width();
   scrH = tft.height();
+  Serial.printf("Screen rotation setting %d -> panel rotation %d, %dx%d\n", cfg.rotation, (1 + cfg.rotation) & 3, scrW, scrH);
   tft.fillScreen(TFT_BLACK);
 
   lv_init();

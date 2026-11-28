@@ -4,6 +4,7 @@
 #include "web_pages.h"
 #include <ArduinoJson.h>
 #include <Update.h>
+#include <LittleFS.h>
 #include <WiFi.h>
 #include <WebServer.h>
 #include "version.h"
@@ -13,6 +14,7 @@ static WebServer server(80);
 static std::function<bool(const String&)> layoutCb;
 static bool updateOk = false;
 static String updateErr;
+static bool installPending = false;
 static size_t updateWritten = 0;
 static int updateTotal = 0;
 
@@ -26,6 +28,7 @@ static bool authed() {
 
 void webBegin(std::function<bool(const String&)> onLayout) {
   layoutCb = onLayout;
+  otaPumpHook = [] { server.handleClient(); };
 
   server.on("/", HTTP_GET, [] { AUTH(); server.send_P(200, "text/html", EDITOR_HTML); });
   server.on("/settings", HTTP_GET, [] { AUTH(); server.send_P(200, "text/html", SETTINGS_HTML); });
@@ -195,6 +198,50 @@ void webBegin(std::function<bool(const String&)> onLayout) {
     server.send(200, "application/json", out);
   });
   server.on("/update", HTTP_GET, [] { AUTH(); server.send_P(200, "text/html", UPDATE_HTML); });
+  server.on("/api/ota/check", HTTP_GET, [] {
+    AUTH();
+    String tag = otaLatestTag();
+    JsonDocument d;
+    d["current"] = FW_VERSION;
+    d["latest"] = tag;
+    d["newer"] = !tag.isEmpty() && otaIsNewer(tag);
+    String out;
+    serializeJson(d, out);
+    server.send(200, "application/json", out);
+  });
+  server.on("/api/ota/install", HTTP_POST, [] {  // starts after this reply; poll /api/ota/status
+    AUTH();
+    installPending = true;
+    server.send(200, "application/json", "{\"ok\":true}");
+  });
+  server.on("/api/ota/status", HTTP_GET, [] {
+    AUTH();
+    OtaState s = otaState();
+    JsonDocument d;
+    d["active"] = s.active;
+    d["phase"] = s.phase;
+    d["pct"] = s.pct;
+    d["error"] = s.error;
+    String out;
+    serializeJson(d, out);
+    server.send(200, "application/json", out);
+  });
+  server.on("/api/reboot", HTTP_POST, [] {
+    AUTH();
+    server.send(200, "text/plain", "ok");
+    delay(500);
+    ESP.restart();
+  });
+  // Factory reset: erases saved Wi-Fi, Home Assistant settings, the web password and both layouts. The page asks twice first.
+  server.on("/api/factory-reset", HTTP_POST, [] {
+    AUTH();
+    LittleFS.remove("/config.json");
+    LittleFS.remove("/layout.json");
+    LittleFS.remove("/layout_portrait.json");
+    server.send(200, "text/plain", "ok");
+    delay(500);
+    ESP.restart();
+  });
   server.on("/api/version", HTTP_GET, [] { AUTH(); server.send(200, "text/plain", FW_VERSION); });
   server.on("/update", HTTP_POST,
     [] {
@@ -247,4 +294,11 @@ void webBegin(std::function<bool(const String&)> onLayout) {
   server.begin();
 }
 
-void webLoop() { server.handleClient(); }
+void webLoop() {
+  server.handleClient();
+  if (installPending) {  // GitHub install requested from the web page; runs here, outside the request handler
+    installPending = false;
+    String err = otaInstallLatest();
+    if (!err.isEmpty()) otaFail(err);
+  }
+}

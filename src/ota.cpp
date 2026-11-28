@@ -10,8 +10,28 @@
 // Anyone able to MITM your network could serve a malicious image. Firmware images are not signed either.
 // Works for public repositories only. All of this is untested on hardware.
 
-void otaReport(const char* phase, int pct) { uiProgress("Updating firmware", phase, pct); }
-void otaFail(const String& why) { uiProgressFail("Update failed", why); }
+static OtaState st = {false, "", 0, ""};
+static bool allowPump = false;
+void (*otaPumpHook)() = nullptr;
+OtaState otaState() { return st; }
+
+void otaReport(const char* phase, int pct) {
+  st.active = true;
+  st.phase = phase;
+  st.pct = pct;
+  st.error = "";
+  uiProgress("Updating firmware", phase, pct);
+  static uint32_t lastPump = 0;
+  if (allowPump && otaPumpHook && millis() - lastPump > 150) {
+    lastPump = millis();
+    otaPumpHook();
+  }
+}
+void otaFail(const String& why) {
+  st.active = false;
+  st.error = why;
+  uiProgressFail("Update failed", why);
+}
 
 String otaLatestTag() {
   WiFiClientSecure c;
@@ -44,8 +64,16 @@ bool otaIsNewer(const String& tag) {
   return false;
 }
 
+static String otaInstallImpl();
 // Finds the "*-ota.bin" asset of the latest release and flashes it. Reboots on success.
 String otaInstallLatest() {
+  allowPump = true;
+  String r = otaInstallImpl();
+  allowPump = false;
+  return r;
+}
+
+static String otaInstallImpl() {
   String url;
   {
     WiFiClientSecure c;
