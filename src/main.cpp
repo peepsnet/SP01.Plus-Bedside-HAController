@@ -118,8 +118,19 @@ static void updateStatusIcons() {
   wifiWatchdog();
 }
 
+// Heap and PSRAM state on the serial port every 30 s, to see memory trouble coming (low "min" or "maxblk" = trouble).
+static void logMemory() {
+  static uint32_t last = 0;
+  if (millis() - last < 30000) return;
+  last = millis();
+  Serial.printf("[mem] up=%lus heap free=%u min=%u maxblk=%u psram free=%u ha=%d wifi=%d\n", (unsigned long)(millis() / 1000),
+                (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap(), (unsigned)ESP.getMaxAllocHeap(),
+                (unsigned)ESP.getFreePsram(), (int)haState(), (int)WiFi.status());
+}
+
 void loop() {
   uiTick();
+  logMemory();
   updateStatusIcons();
   webLoop();
   improvLoop();

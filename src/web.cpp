@@ -183,19 +183,36 @@ void webBegin(std::function<bool(const String&)> onLayout) {
   server.on("/api/entities", HTTP_GET, [] {
     AUTH();
     if (server.hasArg("refresh")) haRefreshEntities();
-    JsonDocument d;
-    d["connected"] = haConnected();
-    d["endpoint"] = haEndpointName();
-    d["loading"] = haEntitiesLoading();
-    JsonArray a = d["entities"].to<JsonArray>();
-    for (auto& e : haEntities()) {
-      JsonArray row = a.add<JsonArray>();
-      row.add(e.first);
-      row.add(e.second);
+    else haEnsureEntities();  // first request after boot loads the list from Home Assistant
+    // Streamed in pieces: the list can be thousands of entities and must not be built in memory in one go.
+    auto esc = [](const String& in) {
+      String o;
+      o.reserve(in.length() + 4);
+      for (size_t i = 0; i < in.length(); i++) {
+        char c = in[i];
+        if (c == '"' || c == '\\') { o += '\\'; o += c; }
+        else if ((unsigned char)c < 0x20) o += ' ';
+        else o += c;
+      }
+      return o;
+    };
+    server.setContentLength(CONTENT_LENGTH_UNKNOWN);
+    server.send(200, "application/json", "");
+    String head = String("{\"connected\":") + (haConnected() ? "true" : "false") + ",\"endpoint\":\"" + haEndpointName() +
+                  "\",\"loading\":" + (haEntitiesLoading() ? "true" : "false") + ",\"entities\":[";
+    server.sendContent(head);
+    String chunk, id, name;
+    size_t cursor = 0;
+    bool first = true;
+    while (haEntitiesNext(cursor, id, name)) {
+      if (!first) chunk += ',';
+      first = false;
+      chunk += "[\"" + esc(id) + "\",\"" + esc(name) + "\"]";
+      if (chunk.length() > 1000) { server.sendContent(chunk); chunk = ""; }
     }
-    String out;
-    serializeJson(d, out);
-    server.send(200, "application/json", out);
+    chunk += "]}";
+    server.sendContent(chunk);
+    server.sendContent("");
   });
   server.on("/update", HTTP_GET, [] { AUTH(); server.send_P(200, "text/html", UPDATE_HTML); });
   server.on("/api/ota/check", HTTP_GET, [] {
