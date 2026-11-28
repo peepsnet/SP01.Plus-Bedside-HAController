@@ -26,7 +26,8 @@ button{cursor:pointer;margin-top:6px}
 small{color:#9aa}
 </style></head><body>
 <h3>Bedside layout editor &nbsp; <small><a href="/settings">Settings</a> &middot; <a href="/update">Update</a> &middot; <span id="ver"></span></small></h3>
-<div style="margin:6px 0"><select id="orient" style="width:auto"><option value="landscape">Landscape layout (480 x 280)</option><option value="portrait">Portrait layout (320 x 440)</option></select> <small id="orientnote"></small></div>
+<div style="margin:6px 0">Editing the <select id="orient" style="width:auto"><option value="landscape">Landscape layout (480 x 280)</option><option value="portrait">Portrait layout (320 x 440)</option></select> <small id="orientnote"></small>
+ <div style="margin-top:6px">Screen rotation: <select id="rot" style="width:auto"><option value="0">0 (landscape)</option><option value="1">90 clockwise (portrait)</option><option value="2">180 (landscape upside down)</option><option value="3">90 counter-clockwise (portrait)</option></select> <button id="rotgo" style="width:auto;display:inline-block;margin:0 0 0 6px">Rotate screen &amp; restart</button> <small>The layout selector above only chooses which layout you are editing, it does not turn the screen.</small></div></div>
 <div id="tabs"></div>
 <div id="wrap">
 <div id="canvas"></div>
@@ -85,7 +86,8 @@ function loadLayout(){
  const c=$('canvas');c.style.width=W*S+'px';c.style.height=H*S+'px';
  fetch('/api/layout?o='+orient).then(r=>r.json()).then(j=>{L=j;pi=0;sel=null;if(!L.pages.length)L.pages=[{name:'Page 1',buttons:[]}];draw()});
 }
-fetch('/api/config').then(r=>r.json()).then(j=>{orient=(j.rotation&1)?'portrait':'landscape';$('orient').value=orient;
+$('rotgo').onclick=async()=>{if(!confirm('Rotate the screen and restart the device?'))return;await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rotation:+$('rot').value})});$('msg').textContent='Restarting with the new rotation...'};
+fetch('/api/config').then(r=>r.json()).then(j=>{orient=(j.rotation&1)?'portrait':'landscape';$('orient').value=orient;$('rot').value=j.rotation;
  $('orientnote').textContent='Screen is currently '+(orient=='portrait'?'portrait':'landscape')+'. Each orientation has its own layout.';loadLayout()}).catch(loadLayout);
 $('orient').onchange=()=>{if(confirm('Switch layout? Unsaved changes to this one are lost.')){orient=$('orient').value;loadLayout()}else $('orient').value=orient};
 function loadEnts(refresh){
@@ -227,6 +229,13 @@ a{color:#7ab}</style></head><body>
 <label>Long-lived access token (leave blank to keep)</label><input name="ha_token" type="password">
 <button type="submit" style="margin-top:14px;background:#2d7a3e">Save &amp; restart</button>
 </form><div id="msg"></div>
+<hr style="margin:18px 0">
+<h4>Maintenance</h4>
+<button type="button" id="reboot">Reboot device</button>
+<small>Restarts the device. Nothing is erased.</small>
+<button type="button" id="freset" style="margin-top:14px;background:#a32727">Factory reset...</button>
+<small>Erases saved Wi-Fi networks, the Home Assistant token and addresses, the web password and both layouts, then restarts into setup mode (Wi-Fi "Bedside-Setup"). You are asked to confirm twice.</small>
+<div id="mmsg"></div>
 <script>
 
 const $=id=>document.getElementById(id);
@@ -263,11 +272,19 @@ $('wscan').onclick=async()=>{
    d.appendChild(b);box.appendChild(d)})}catch(e){$('wscanres').textContent='Scan failed: '+e.message}};
 $('wadd').onclick=async()=>{try{await api('/api/wifi/save',{ssid:$('wssid').value.trim(),pass:$('wpass').value});$('wssid').value='';$('wpass').value='';loadWifi()}catch(e){alert(e.message)}};
 loadWifi();
+$('reboot').onclick=async()=>{if(!confirm('Reboot the device now?'))return;
+ try{await api('/api/reboot',{})}catch(e){}$('mmsg').textContent='Rebooting... reload this page in about 20 seconds.'};
+$('freset').onclick=async()=>{
+ if(!confirm('FACTORY RESET\n\nThis erases ALL saved settings: Wi-Fi networks, Home Assistant token and addresses, the web password and every layout.\n\nContinue?'))return;
+ const w=prompt('Second confirmation: type RESET (capital letters) to erase everything.');
+ if(w!=='RESET'){$('mmsg').textContent='Factory reset cancelled.';return}
+ try{await api('/api/factory-reset',{})}catch(e){}
+ $('mmsg').textContent='Erased. The device is restarting into setup mode: join Wi-Fi "Bedside-Setup" and open http://192.168.4.1/settings. The new web password is on the device screen under the gear, About.'};
 const f=document.getElementById('f');
 fetch('/api/config').then(r=>r.json()).then(j=>{for(const k in j){const e=f.elements[k];if(!e)continue;if(e.type=='checkbox')e.checked=j[k];else e.value=j[k]}});
 f.onsubmit=async e=>{e.preventDefault();const o={};for(const el of f.elements){if(!el.name)continue;o[el.name]=el.type=='checkbox'?el.checked:(el.type=='number'||el.name=='rotation')?+el.value:el.value}
  const r=await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(o)});
- document.getElementById('msg').textContent=r.ok?'Saved. Device is restarting...':'Save failed'};
+ document.getElementById('msg').textContent=r.ok?'Saved'+(o.rotation!==undefined?' (screen rotation '+['0','90 clockwise','180','90 counter-clockwise'][o.rotation]+')':'')+'. Device is restarting, the screen changes when it is back...':'Save failed'};
 </script></body></html>)HTML";
 
 static const char UPDATE_HTML[] PROGMEM = R"HTML(<!doctype html>
@@ -277,6 +294,12 @@ static const char UPDATE_HTML[] PROGMEM = R"HTML(<!doctype html>
 input,button{width:100%;box-sizing:border-box;padding:8px;margin-top:10px;background:#23262a;color:#eee;border:1px solid #444;border-radius:6px}a{color:#7ab}</style></head><body>
 <h3>Firmware update &nbsp; <small><a href="/">Layout</a></small></h3>
 <p>Running: <b id="ver">...</b></p>
+<h4 style="margin-bottom:4px">Update from GitHub</h4>
+<button id="chk" style="background:#2b4a7a">Check for a new version</button>
+<div id="chkres" style="margin-top:6px"></div>
+<button id="inst" style="display:none;background:#2d7a3e">Install</button>
+<hr style="margin:18px 0;border-color:#333">
+<h4 style="margin-bottom:4px">Or upload a file</h4>
 <p>Upload the <code>*-ota.bin</code> file from a GitHub release (not the <code>-full.bin</code>). The device shows the same progress on its screen and reboots when done.</p>
 <input type="file" id="f" accept=".bin"><button id="go" style="background:#2d7a3e">Upload &amp; install</button>
 <progress id="p" value="0" max="100" style="width:100%;margin-top:10px"></progress>
@@ -294,6 +317,24 @@ function waitForReboot(){
   }catch(e){wentDown=true}
   if(tries>60){clearInterval(t);stage('The device has not come back after 2 minutes. Check its screen.','bad')}},2000);
 }
+$('chk').onclick=async()=>{$('chkres').textContent='Checking GitHub...';$('inst').style.display='none';
+ try{const j=await (await fetch('/api/ota/check')).json();
+  if(!j.latest)$('chkres').textContent='Could not reach GitHub (the device needs internet, and the repository must be public).';
+  else if(j.newer){$('chkres').textContent='New version '+j.latest+' available (you have v'+j.current+').';$('inst').textContent='Install '+j.latest;$('inst').style.display='block'}
+  else $('chkres').textContent='Up to date (latest is '+j.latest+', you have v'+j.current+').';
+ }catch(e){$('chkres').textContent='Check failed: '+e}};
+$('inst').onclick=async()=>{if(!confirm('Download and install the latest release now? The device reboots when it is done.'))return;
+ $('inst').disabled=true;$('chk').disabled=true;$('go').disabled=true;stage('Starting...');
+ try{await fetch('/api/ota/install',{method:'POST'})}catch(e){}
+ let fails=0;
+ const t=setInterval(async()=>{
+  try{const s=await (await fetch('/api/ota/status',{cache:'no-store'})).json();fails=0;
+   if(s.error){clearInterval(t);stage('Install failed','bad');$('msg').textContent=s.error;$('inst').disabled=false;$('chk').disabled=false;$('go').disabled=false;return}
+   if(s.pct>=0)$('p').value=s.pct;else $('p').removeAttribute('value');
+   stage(s.phase+(s.pct>=0?' '+s.pct+'%':''));
+   if(s.phase=='Rebooting'){clearInterval(t);waitForReboot()}
+  }catch(e){fails++;if(fails>=3){clearInterval(t);waitForReboot()}}},700);
+};
 $('go').onclick=()=>{const f=$('f').files[0];if(!f)return;$('go').disabled=true;$('msg').textContent='';
  const x=new XMLHttpRequest(),fd=new FormData();fd.append('firmware',f);
  stage('Uploading 0%');

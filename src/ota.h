@@ -10,4 +10,9 @@ String otaInstallLatest();
 // Progress for any firmware install (GitHub download or web upload), shown full screen on the touchscreen.
 // pct < 0 means "working, no percentage". Phases used: Looking up release, Downloading, Writing, Verifying, Rebooting.
 void otaReport(const char* phase, int pct);
+// Latest install state, for the web page to poll.
+struct OtaState { bool active; String phase; int pct; String error; };
+OtaState otaState();
+// While a GitHub install runs, this is called so the web server can keep answering status requests.
+extern void (*otaPumpHook)();
 void otaFail(const String& why);  // shows the error with a Close button
