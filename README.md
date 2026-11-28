@@ -112,7 +112,7 @@ Add a **camera button** in the layout editor (`type: "camera"`). Give it either 
 
 ## Layout editor sizes
 
-Sizes and positions are shown and editable in **grid cells** (1 cell = 20 px, so the usable area is 24 x 14 cells): width, height, column and row, next to drag and resize, which now snap to the grid. `layout.json` still stores pixels, so existing layouts keep working; a button that is not a whole number of cells shows a fraction such as 7.5 x 4.5.
+Sizes and positions are shown and editable in **grid cells** (1 cell = 20 px, so the usable area is 24 x 14 cells): width, height, column and row, next to drag and resize, which snap to a quarter of a cell (5 px). `layout.json` still stores pixels, so existing layouts keep working; a button that is not a whole number of cells shows a fraction such as 7.5 x 4.5.
 
 The editor preview is the device screen area scaled to fit the browser: one grid cell is always the same size for the grid and every element, at any browser width, and elements are clipped to (and on load moved inside) the screen area. Device and editor both use the same pixel coordinates (origin at the top left of the 480 x 280 canvas).
 
