@@ -376,7 +376,7 @@ static void refreshWidget(Widget& w, const EntityInfo& e) {
   if (std::isnan(v) || lv_slider_is_dragged(w.obj)) return;  // never fight the user's finger
   lv_slider_set_value(w.obj, (int)lroundf(v * w.mul), LV_ANIM_OFF);
   String t = w.label + "  " + String(v, w.mul > 1 ? 1 : 0) + w.unit;
-  lv_label_set_text(w.text, t.c_str());
+  if (w.text) lv_label_set_text(w.text, t.c_str());  // a slider built into a button has no caption
 }
 
 // Button labels use the largest of 18/16/14/12 px that fits the button width on one line; if even 12 px is too wide, the
@@ -389,7 +389,9 @@ static const lv_font_t* fitFont(const String& s, int avail, bool& fits) {
   return fs[3];
 }
 
-static void buildButton(Widget& w, lv_obj_t* page, lv_color_t c, JsonObject b, int x, int y, int bw, int bh) {
+// ws: the button has a slider built in at the bottom (JSON "with_slider"): one element, SL_AREA px taller.
+static constexpr int SL_AREA = 34;
+static void buildButton(Widget& w, lv_obj_t* page, lv_color_t c, JsonObject b, int x, int y, int bw, int bh, bool ws) {
   lv_obj_t* btn = lv_button_create(page);
   w.obj = btn;
   lv_obj_set_pos(btn, x, y);
@@ -397,22 +399,33 @@ static void buildButton(Widget& w, lv_obj_t* page, lv_color_t c, JsonObject b, i
   lv_obj_set_style_radius(btn, 12, 0);
   lv_obj_set_style_bg_color(btn, lv_color_darken(c, 180), 0);  // off
   lv_obj_set_style_bg_color(btn, c, LV_STATE_CHECKED);         // on
-  lv_obj_set_flex_flow(btn, LV_FLEX_FLOW_COLUMN);
-  lv_obj_set_flex_align(btn, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+  lv_obj_t* host = btn;  // where the icon and label go
+  if (ws) {              // icon and label sit in the top part, the slider in the bottom SL_AREA px of the same button
+    lv_obj_set_style_pad_all(btn, 0, 0);
+    host = lv_obj_create(btn);
+    lv_obj_remove_style_all(host);
+    lv_obj_set_size(host, bw, bh - SL_AREA);
+    lv_obj_remove_flag(host, LV_OBJ_FLAG_CLICKABLE);  // touches fall through to the button
+    lv_obj_remove_flag(host, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_pad_hor(host, 6, 0);
+  } else {
+    lv_obj_set_style_pad_hor(btn, 6, 0);  // fixed side padding so the label fit below is exact
+  }
+  lv_obj_set_flex_flow(host, LV_FLEX_FLOW_COLUMN);
+  lv_obj_set_flex_align(host, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
   const char* sym = iconSymbol(String(b["icon"] | ""));
   if (sym) {
-    lv_obj_t* ic = lv_label_create(btn);
+    lv_obj_t* ic = lv_label_create(host);
     lv_obj_set_style_text_font(ic, &lv_font_montserrat_24, 0);
     lv_label_set_text(ic, sym);
   }
-  lv_obj_t* lb = lv_label_create(btn);
-  lv_obj_set_style_pad_hor(btn, 6, 0);  // fixed side padding so the fit below is exact
+  lv_obj_t* lb = lv_label_create(host);
   const int avail = bw - 12;
   bool fits;
   lv_obj_set_style_text_font(lb, fitFont(w.label, avail, fits), 0);
   if (!fits) {  // too long even at 12 px: wrap to two lines when the button is tall enough, then cut with "..."
     const lv_font_t* f = fitFont(w.label, avail, fits);
-    int lines = bh >= 60 ? 2 : 1;
+    int lines = (bh - (ws ? SL_AREA : 0)) >= 60 ? 2 : 1;
     lv_obj_set_size(lb, avail, lines * lv_font_get_line_height(f));
     lv_label_set_long_mode(lb, LV_LABEL_LONG_DOT);
     lv_obj_set_style_text_align(lb, LV_TEXT_ALIGN_CENTER, 0);
@@ -432,6 +445,50 @@ static void buildButton(Widget& w, lv_obj_t* page, lv_color_t c, JsonObject b, i
       if (pressHandler) pressHandler(cx->entity, cx->action);
     }, LV_EVENT_CLICKED, &w);
   }
+}
+
+// Touch handling shared by stand-alone sliders and sliders built into a button.
+static void wireSlider(Widget& w, lv_obj_t* sl) {
+  if (!w.entity.length()) return;
+  auto send = [](lv_event_t* e) {
+    auto* cx = (Widget*)lv_event_get_user_data(e);
+    float v = lv_slider_get_value(cx->obj) / cx->mul;
+    if (slideHandler) slideHandler(cx->entity, cx->attr, v);
+  };
+  lv_obj_add_event_cb(sl, [](lv_event_t*) { sliderHeld = true; }, LV_EVENT_PRESSED, nullptr);
+  lv_obj_add_event_cb(sl, [](lv_event_t* e) { sliderHeld = false; }, LV_EVENT_RELEASED, nullptr);
+  lv_obj_add_event_cb(sl, send, LV_EVENT_RELEASED, &w);
+  // While dragging: update the caption (if any) and send at most every 300 ms so lights follow the finger.
+  lv_obj_add_event_cb(sl, [](lv_event_t* e) {
+    auto* cx = (Widget*)lv_event_get_user_data(e);
+    float v = lv_slider_get_value(cx->obj) / cx->mul;
+    if (cx->text) {
+      String t = cx->label + "  " + String(v, cx->mul > 1 ? 1 : 0) + cx->unit;
+      lv_label_set_text(cx->text, t.c_str());
+    }
+    if (lv_slider_is_dragged(cx->obj) && millis() - cx->lastSend > 300) {
+      cx->lastSend = millis();
+      if (slideHandler) slideHandler(cx->entity, cx->attr, v);
+    }
+  }, LV_EVENT_VALUE_CHANGED, &w);
+}
+
+// The slider inside a button: white knob and fill on a darkened track so it reads on any button color.
+static void buildInlineSlider(Widget& sw, lv_obj_t* btn, JsonObject b, int bw) {
+  sw.attr = String(b["slider_attr"] | "");
+  int mn, mx;
+  sliderSpec(sw, b, mn, mx);
+  lv_obj_t* sl = lv_slider_create(btn);
+  sw.obj = sl;
+  lv_obj_set_size(sl, bw - 28, 10);
+  lv_obj_align(sl, LV_ALIGN_BOTTOM_MID, 0, -10);
+  lv_slider_set_range(sl, mn * sw.mul, mx * sw.mul);
+  lv_obj_set_style_bg_color(sl, lv_color_black(), LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(sl, LV_OPA_30, LV_PART_MAIN);
+  lv_obj_set_style_bg_color(sl, lv_color_white(), LV_PART_INDICATOR);
+  lv_obj_set_style_bg_color(sl, lv_color_white(), LV_PART_KNOB);
+  lv_obj_set_style_pad_all(sl, 5, LV_PART_KNOB);
+  wireSlider(sw, sl);
 }
 
 static void buildSlider(Widget& w, lv_obj_t* page, lv_color_t c, JsonObject b, int x, int y, int bw, int bh) {
@@ -467,27 +524,29 @@ static void buildSlider(Widget& w, lv_obj_t* page, lv_color_t c, JsonObject b, i
   lv_obj_set_style_bg_color(sl, c, LV_PART_INDICATOR);
   lv_obj_set_style_bg_color(sl, c, LV_PART_KNOB);
   lv_obj_set_style_pad_all(sl, 5, LV_PART_KNOB);
-  if (w.entity.length()) {
-    auto send = [](lv_event_t* e) {
-      auto* cx = (Widget*)lv_event_get_user_data(e);
-      float v = lv_slider_get_value(cx->obj) / cx->mul;
-      if (slideHandler) slideHandler(cx->entity, cx->attr, v);
-    };
-    lv_obj_add_event_cb(sl, [](lv_event_t*) { sliderHeld = true; }, LV_EVENT_PRESSED, nullptr);
-    lv_obj_add_event_cb(sl, [](lv_event_t* e) { sliderHeld = false; }, LV_EVENT_RELEASED, nullptr);
-    lv_obj_add_event_cb(sl, send, LV_EVENT_RELEASED, &w);
-    // While dragging: update the caption and send at most every 300 ms so lights follow the finger.
-    lv_obj_add_event_cb(sl, [](lv_event_t* e) {
-      auto* cx = (Widget*)lv_event_get_user_data(e);
-      float v = lv_slider_get_value(cx->obj) / cx->mul;
-      String t = cx->label + "  " + String(v, cx->mul > 1 ? 1 : 0) + cx->unit;
-      lv_label_set_text(cx->text, t.c_str());
-      if (lv_slider_is_dragged(cx->obj) && millis() - cx->lastSend > 300) {
-        cx->lastSend = millis();
-        if (slideHandler) slideHandler(cx->entity, cx->attr, v);
-      }
-    }, LV_EVENT_VALUE_CHANGED, &w);
+  wireSlider(w, sl);
+}
+
+// Older layouts stored a button's auto-added slider as a separate element ("linked" = the button's id). Fold each one into
+// its button ("with_slider") so old layouts keep working: if the slider sat directly below the button, the button grows to
+// cover both, otherwise it just grows by 40 px.
+static void mergeLinkedSliders(JsonArray bs) {
+  for (JsonObject s : bs) {
+    String link = s["linked"] | "";
+    if (link.isEmpty() || String(s["type"] | "") != "slider") continue;
+    for (JsonObject t : bs) {
+      if (String(t["id"] | "") != link || String(t["type"] | "button") == "slider") continue;
+      int ty = t["y"] | 0, th = t["h"] | 70, sy = s["y"] | 0, sh = s["h"] | 60;
+      t["with_slider"] = true;
+      String a = s["attr"] | "";
+      if (a.length()) t["slider_attr"] = a;
+      t["h"] = sy >= ty + th - 5 ? (sy + sh - ty) : th + 40;
+      s["merged"] = true;
+      break;
+    }
   }
+  for (size_t i = bs.size(); i-- > 0;)
+    if (bs[i]["merged"] | false) bs.remove(i);
 }
 
 bool uiBuild(const String& layoutJson) {
@@ -503,6 +562,7 @@ bool uiBuild(const String& layoutJson) {
   lv_obj_clean(barHolder);
 
   JsonArray pg = doc["pages"].as<JsonArray>();
+  for (JsonObject p : pg) mergeLinkedSliders(p["buttons"].as<JsonArray>());
   const bool multi = pg.size() > 1;
   for (JsonObject p : pg) {
     lv_obj_t* page = lv_obj_create(canvasHolder);
@@ -540,9 +600,10 @@ bool uiBuild(const String& layoutJson) {
       const char* hex = b["color"] | "#4A90E2";
       lv_color_t c = lv_color_hex(strtoul(hex[0] == '#' ? hex + 1 : hex, nullptr, 16));
       int bx = b["x"] | 0, by = b["y"] | 0, bw = b["w"] | 100, bh = b["h"] | 70;
+      const bool ws = !w->slider && !w->camera && (b["with_slider"] | false) && w->entity.length() && bh > SL_AREA + 30;
 
       if (w->slider) buildSlider(*w, page, c, b, bx, by, bw, bh);
-      else buildButton(*w, page, c, b, bx, by, bw, bh);
+      else buildButton(*w, page, c, b, bx, by, bw, bh, ws);
 
       if (w->entity.length() && !w->camera) {  // a camera tile opens a stream, it has no state to follow
         if (std::find(entityList.begin(), entityList.end(), w->entity) == entityList.end())
@@ -550,6 +611,16 @@ bool uiBuild(const String& layoutJson) {
         byEntity[w->entity].push_back(w.get());
         auto it = known.find(w->entity);
         if (it != known.end()) refreshWidget(*w, it->second);
+      }
+      if (ws) {  // the slider built into the button follows the same entity
+        auto sw = std::unique_ptr<Widget>(new Widget());
+        sw->slider = true;
+        sw->entity = w->entity;
+        buildInlineSlider(*sw, w->obj, b, bw);
+        byEntity[sw->entity].push_back(sw.get());
+        auto it = known.find(sw->entity);
+        if (it != known.end()) refreshWidget(*sw, it->second);
+        widgets.push_back(std::move(sw));
       }
       widgets.push_back(std::move(w));
     }

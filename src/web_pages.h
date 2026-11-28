@@ -17,7 +17,7 @@ a{color:#7ab}
  text-align:center;color:#fff;cursor:move;user-select:none;overflow:hidden;font-family:Montserrat,"Segoe UI",system-ui,sans-serif;font-weight:500}
 .b svg{flex:none;fill:currentColor}
 .b.sl{background:#23272b!important;align-items:flex-start;justify-content:flex-start}
-.b.sl i{position:absolute;display:block;opacity:.9}
+.b i{position:absolute;display:block}
 .b.sel{outline:2px solid #fff}
 .h{position:absolute;right:0;bottom:0;width:18px;height:18px;background:#fff8;cursor:nwse-resize}
 #form{width:280px}
@@ -96,7 +96,7 @@ let rzT;addEventListener('resize',()=>{clearTimeout(rzT);rzT=setTimeout(()=>{fit
 function loadLayout(){
  W=orient=='portrait'?320:480;H=orient=='portrait'?440:280;
  fit();
- fetch('/api/layout?o='+orient).then(r=>r.json()).then(j=>{L=j;pi=0;sel=null;if(!L.pages.length)L.pages=[{name:'Page 1',buttons:[]}];draw()});
+ fetch('/api/layout?o='+orient).then(r=>r.json()).then(j=>{L=j;mergeLinked(L);pi=0;sel=null;if(!L.pages.length)L.pages=[{name:'Page 1',buttons:[]}];draw()});
 }
 $('rotgo').onclick=async()=>{if(!confirm('Rotate the screen and restart the device?'))return;await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rotation:+$('rot').value})});$('msg').textContent='Restarting with the new rotation...'};
 fetch('/api/config').then(r=>r.json()).then(j=>{orient=(j.rotation&1)?'portrait':'landscape';$('orient').value=orient;$('rot').value=j.rotation;
@@ -130,9 +130,14 @@ const ICON_SVG={
 const mctx=document.createElement('canvas').getContext('2d');
 function fitPx(txt,avail){for(const px of [18,16,14,12]){mctx.font='500 '+px+'px Montserrat,"Segoe UI",system-ui,sans-serif';if(mctx.measureText(txt).width<=avail)return px}return 12}
 // When even 12 px does not fit on one line the label wraps to 2 lines (1 if the button is under 60 px tall) and is cut with an ellipsis.
+function inlineTrack(d,b){const L0=14*S,len=(b.w-28)*S,TR=10,KN=20;
+ const mk=css=>{const i=document.createElement('i');i.style.cssText=css;d.appendChild(i)};
+ mk(`background:rgba(0,0,0,.3);border-radius:999px;left:${L0}px;width:${len}px;bottom:${10*S}px;height:${TR*S}px`);
+ mk(`background:#fff;border-radius:999px;left:${L0}px;width:${len/2}px;bottom:${10*S}px;height:${TR*S}px`);
+ mk(`background:#fff;border-radius:50%;left:${L0+len/2-KN/2*S}px;bottom:${(10+TR/2-KN/2)*S}px;width:${KN*S}px;height:${KN*S}px;box-shadow:0 0 0 ${S}px #0003`)}
 function wrapLbl(t,b){mctx.font='500 12px Montserrat,"Segoe UI",system-ui,sans-serif';
  const long=mctx.measureText(t.textContent).width>b.w-12;
- t.style.cssText+=long?`;white-space:normal;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:${b.h>=60?2:1};line-clamp:${b.h>=60?2:1};overflow:hidden;width:${(b.w-12)*S}px;line-height:${14*S}px;max-height:${(b.h>=60?2:1)*14*S}px`:''}
+ t.style.cssText+=long?`;white-space:normal;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:${(b.h-(b.with_slider&&b.type!='camera'?34:0))>=60?2:1};line-clamp:${(b.h-(b.with_slider&&b.type!='camera'?34:0))>=60?2:1};overflow:hidden;width:${(b.w-12)*S}px;line-height:${14*S}px;max-height:${((b.h-(b.with_slider&&b.type!='camera'?34:0))>=60?2:1)*14*S}px`:''}
 function draw(){
  $('tabs').innerHTML='';
  L.pages.forEach((p,i)=>{const t=document.createElement('button');t.className='tab'+(i==pi?' on':'');t.textContent=p.name;t.onclick=()=>{pi=i;sel=null;draw()};$('tabs').appendChild(t)});
@@ -164,10 +169,12 @@ function draw(){
     knob.style.left=`calc(50% - ${KN/2*S}px)`;knob.style.bottom=(14*S+len/2-KN/2*S)+'px'}
    d.appendChild(bar);d.appendChild(fill);d.appendChild(knob);
   }else{
-   d.style.padding='0 '+6*S+'px';
+   const ws=!!b.with_slider&&b.type!='camera';
+   d.style.padding='0 '+6*S+'px '+(ws?34*S:0)+'px';
    const ic=ICON_SVG[b.icon||(b.type=='camera'?'video':'')];
    if(ic){const s=document.createElement('span');s.innerHTML=ic;const v=s.firstChild;v.setAttribute('width',24*S);v.setAttribute('height',24*S);s.style.cssText='display:flex;max-width:none';d.appendChild(s)}
    const t=document.createElement('span');t.className='lbl'+(b.label?'':' ent');t.style.fontSize=fitPx(b.label||b.entity_id||'',b.w-12)*S+'px';t.textContent=b.label||b.entity_id||'';d.appendChild(t);wrapLbl(t,b);
+   if(ws)inlineTrack(d,b);
   }
   d.onpointerdown=e=>{sel=i;drag(e,b,'move');showProps();markSel()};
   const h=document.createElement('div');h.className='h';h.onpointerdown=e=>{e.stopPropagation();sel=i;drag(e,b,'size')};
@@ -202,29 +209,24 @@ function applyCells(){
 for(const id of['cw','ch','cx','cy'])$(id).onchange=applyCells;
 const SLIDER_DOMAINS=['light','cover','fan','media_player','climate','number','input_number'];
 const domainOf=b=>(b.entity_id||'').split('.')[0];
-const linkedIdx=b=>L.pages[pi].buttons.findIndex(x=>x.linked===b.id);
 function updateSliderBox(b){
  const ok=SLIDER_DOMAINS.includes(domainOf(b));
- $('withslider').disabled=!ok;$('withslider').checked=linkedIdx(b)>=0;
- $('slnote').textContent=!b.entity_id?'Pick an entity first.':(ok?'':'No slider for this device type.');
+ $('withslider').disabled=!ok;$('withslider').checked=!!b.with_slider;
+ $('slnote').textContent=!b.entity_id?'Pick an entity first.':(ok?'The slider is part of this button: it grows taller and moves, resizes and deletes with it.':'No slider for this device type.');
 }
+// The slider is built into the button (b.with_slider): the button grows by 40 px (the bottom 34 px hold the slider).
 $('withslider').onchange=()=>{
- const bs=L.pages[pi].buttons,b=bs[sel];if(!b)return;
- if($('withslider').checked){
-  // Place the slider right under the button, else above it, else at the bottom of the screen.
-  const w=Math.max(b.w,4*G),h=3*G;let x=Math.min(b.x,W-w),y=b.y+b.h;
-  if(y+h>H){y=b.y-h;if(y<0)y=Math.max(0,H-h)}
-  bs.push({id:'s'+Date.now(),type:'slider',label:b.label,entity_id:b.entity_id,color:b.color,x,y,w,h,linked:b.id});
- }else{
-  const i=linkedIdx(b);if(i>=0){bs.splice(i,1);if(i<sel)sel--}
- }
+ const b=L.pages[pi].buttons[sel];if(!b)return;const SL=40;
+ if($('withslider').checked){b.with_slider=true;if(b.y+b.h+SL>H)b.y=Math.max(0,H-b.h-SL);b.h=Math.min(H-b.y,b.h+SL)}
+ else{delete b.with_slider;b.h=Math.max(2*G,b.h-SL)}
  draw();
 };
-function syncLinked(b,k){
- const bs=L.pages[pi].buttons,i=linkedIdx(b);if(i<0||!['label','entity_id','color'].includes(k))return;
- bs[i][k]=b[k];const d=$('canvas').children[i];
- if(k=='label'||k=='entity_id'){const l=d.querySelector('.lbl');if(l)l.textContent=(bs[i].label?bs[i].label+'  ':'')+'50%'}
-}
+// Older layouts have the auto-added slider as a separate element with "linked" = the button's id: fold it into the button.
+function mergeLinked(l){l.pages.forEach(p=>{const bs=p.buttons;
+ bs.filter(s=>s.type=='slider'&&s.linked).forEach(s=>{const t=bs.find(x=>x.id===s.linked&&x.type!='slider');if(!t)return;
+  t.with_slider=true;if(s.attr)t.slider_attr=s.attr;
+  t.h=s.y>=t.y+t.h-5?s.y+s.h-t.y:t.h+40;s.merged_=1});
+ p.buttons=bs.filter(x=>!x.merged_)})}
 function showProps(){
  const b=sel!=null?L.pages[pi].buttons[sel]:null;$('props').style.display=b?'block':'none';if(!b)return;
  const sl=b.type=='slider',cam=b.type=='camera';$('btnprops').style.display=sl?'none':'block';$('slprops').style.display=sl?'block':'none';
@@ -239,7 +241,7 @@ for(const k of FIELDS)$(k).oninput=()=>{
  const d=$('canvas').children[sel];
  if(k=='label'||k=='entity_id'){const l=d.querySelector('.lbl');if(l){l.textContent=b.type=='slider'?(b.label?b.label+'  ':'')+'50%':(b.label||b.entity_id||'');if(b.type!='slider'){l.style.fontSize=fitPx(l.textContent,b.w-12)*S+'px';wrapLbl(l,b)}l.classList.toggle('ent',!b.label&&b.type!='slider')}}
  if(k=='icon'){draw();return}
- if(b.type!='slider'&&b.type!='camera'){syncLinked(b,k);if(k=='entity_id')updateSliderBox(b)}
+ if(b.type!='slider'&&b.type!='camera'){if(k=='entity_id')updateSliderBox(b)}
  if(k=='color'){draw();return}};
 $('add').onclick=()=>addW({type:'button',label:'New',icon:'power',x:20,y:20,w:140,h:80,action:'toggle'});
 $('fullbright').onchange=()=>{const b=L.pages[pi].buttons[sel];if(!b)return;if($('fullbright').checked)b.full_brightness=true;else delete b.full_brightness};
