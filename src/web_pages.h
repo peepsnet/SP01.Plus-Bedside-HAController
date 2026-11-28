@@ -35,7 +35,7 @@ small{color:#9aa}
 <div id="wrap">
 <div><div id="canvas"></div><small id="areanote"></small></div>
 <div id="form">
- <button id="add">+ Add button</button><button id="addsl">+ Add slider</button><button id="addcam">+ Add camera button</button>
+ <button id="add">+ Add button</button><button id="addsl">+ Add slider</button><button id="addcam">+ Add camera button</button><button id="addth">+ Add thermostat</button><button id="addval">+ Add value tile</button>
  <div id="props" style="display:none">
   <label>Label</label><input id="label">
   <label>Entity <small id="entnote"></small></label><input id="entity_id" list="ents" placeholder="light.bedside" autocomplete="off">
@@ -60,6 +60,26 @@ small{color:#9aa}
    <input id="url" placeholder="http://user:pass@192.168.1.50/mjpeg" autocomplete="off">
    <label><input id="fullbright" type="checkbox" style="width:auto"> Force full screen brightness while the camera is open</label>
    <small>Tapping the button opens the camera full screen; tap or swipe to close. Needs an MJPEG or JPEG snapshot URL. RTSP is not supported.</small>
+  </div>
+  <div id="thprops" style="display:none">
+   <label>Step per tap <small>(blank = the thermostat's own step, else 0.5)</small></label><input id="step" type="number" step="0.1" min="0.1">
+   <label>Unit <small>(blank = degree sign)</small></label><input id="tunit" placeholder="&deg;C" autocomplete="off">
+   <label>Lowest / highest set point <small>(blank = from the thermostat)</small></label>
+   <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px"><input id="tmin" type="number" placeholder="min"><input id="tmax" type="number" placeholder="max"></div>
+   <small>Shows the current temperature and the set point of a climate entity. Tap - and + to change the set point; it is sent when you stop tapping. Tile text and buttons scale to the tile size.</small>
+  </div>
+  <div id="valprops" style="display:none">
+   <label>Attribute to show <small>(blank = the entity's state)</small></label><input id="vattr" placeholder="battery_level" autocomplete="off">
+   <label>Subtitle <small>(text; optional)</small></label><input id="subtitle" placeholder="Charging: {}" autocomplete="off">
+   <label>Subtitle from another entity <small>(optional: its state replaces {} in the subtitle, or follows it)</small></label>
+   <input id="sub_entity" list="ents" placeholder="binary_sensor.tesla_charging" autocomplete="off">
+   <label>Attribute of that entity <small>(blank = its state)</small></label><input id="sub_attr" autocomplete="off">
+   <label>Unit <small>(blank = the unit Home Assistant reports)</small></label><input id="vunit" placeholder="%" autocomplete="off">
+   <label>Decimals <small>(blank = automatic)</small></label><input id="decimals" type="number" min="0" max="3">
+   <label><input id="bar" type="checkbox" style="width:auto"> Show a level bar</label>
+   <label>Bar empty / full at <small>(blank = 0 / 100)</small></label>
+   <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px"><input id="vmin" type="number" placeholder="0"><input id="vmax" type="number" placeholder="100"></div>
+   <small>Shows the entity's value big, with the label as title and the subtitle below. Text and bar scale to the tile size.</small>
   </div>
   <div id="slprops">
    <label>Slider controls</label><select id="attr"><option value="">Default for this device</option><option value="brightness">Light brightness</option><option value="color_temp">Light color temperature</option></select>
@@ -148,6 +168,48 @@ function inlineTrack(d,b){const A=slArea(b.h),TR=trPx(A),KN=2*TR,m=Math.max(TR+1
  mk(`background:rgba(0,0,0,.3);border-radius:999px;left:${L0}px;width:${len}px;bottom:${bot}px;height:${TR*S}px`);
  mk(`background:#fff;border-radius:999px;left:${L0}px;width:${len/2}px;bottom:${bot}px;height:${TR*S}px`);
  mk(`background:#fff;border-radius:50%;left:${L0+len/2-KN/2*S}px;bottom:${bot+(TR/2-KN/2)*S}px;width:${KN*S}px;height:${KN*S}px;box-shadow:0 0 0 ${S}px #0003`)}
+// ---- Thermostat and value tiles: same rules as the device (fitValue / refreshThermo in ui.cpp) with sample values ----
+const VPX=[24,18,16,14,12],VLH=[27,21,18,16,15];
+function pickFont(t,from,maxW,maxH){for(let i=from;i<5;i++)if(VLH[i]<=maxH&&tw(t,VPX[i])<=maxW)return i;return -1}
+function fitValue(area,ht,hs){for(const c of [[ht,hs],[ht,false],[false,false]])for(let v=0;v<5;v++)for(let sz=3;sz<=4;sz++){
+ if(VPX[v]<VPX[sz])continue;if(VLH[v]+(c[0]?VLH[sz]:0)+(c[1]?VLH[sz]:0)<=area)return{ht:c[0],hs:c[1],vi:v,si:sz}}return{ht:false,hs:false,vi:4,si:4}}
+const dk=(hex,n)=>{const v=parseInt((hex||'#4A90E2').slice(1),16);const f=1-n/255;return 'rgb('+[v>>16&255,v>>8&255,v&255].map(x=>Math.round(x*f)).join(',')+')'};
+function tspan(d,txt,idx,css){const t=document.createElement('span');t.textContent=txt;
+ t.style.cssText=`font-size:${VPX[idx]*S}px;line-height:${VLH[idx]*S}px;height:${VLH[idx]*S}px;${css}`;d.appendChild(t);return t}
+function drawValue(d,b){
+ d.style.background=dk(b.color,180);
+ const bar=!!b.bar,barH=b.h>=60?8:6,res=bar?barH+14:0;
+ const sample=72,unit=b.unit!==undefined?b.unit:'%',vt=(b.decimals!==undefined?sample.toFixed(b.decimals):String(sample))+(unit&&unit!='%'&&!unit.startsWith('°')?' ':'')+unit;
+ let sub=b.subtitle||'';if(b.sub_entity){sub=sub?(sub.includes('{}')?sub.replace('{}','Charging'):sub+' Charging'):'Charging'}
+ const f=fitValue(b.h-res-6,!!b.label,!!sub);
+ d.style.padding=`0 ${6*S}px ${res*S}px`;
+ const mw=(b.w-12)*S,wide=`width:${mw}px;max-width:${mw}px;`;
+ if(f.ht)tspan(d,b.label,f.si,wide+'opacity:.8');
+ let vi=f.vi;while(vi<4&&tw(vt,VPX[vi])>b.w-12)vi++;
+ tspan(d,vt,vi,wide);
+ if(f.hs)tspan(d,sub,f.si,wide+'opacity:.8');
+ if(bar){const fr=Math.max(0,Math.min(1,(sample-(b.min!==undefined?b.min:0))/(((b.max!==undefined?b.max:100)-(b.min!==undefined?b.min:0))||1)));
+  const mk=css=>{const i=document.createElement('i');i.style.cssText=css;d.appendChild(i)};
+  const base=`border-radius:999px;left:${8*S}px;bottom:${6*S}px;height:${barH*S}px;`;
+  mk(base+`background:rgba(0,0,0,.3);width:${(b.w-16)*S}px`);mk(base+`background:${b.color||'#4A90E2'};width:${(b.w-16)*S*fr}px`)}
+}
+function drawThermo(d,b){
+ d.style.background='#23272b';d.style.justifyContent='flex-start';
+ const u=b.unit!==undefined?b.unit:'°',cur='21.5'+u,set='22'+u,status='Heating';
+ const ctrlH=Math.max(24,Math.min(40,Math.floor(b.h*36/100))),cbw=Math.max(28,Math.min(48,Math.floor(b.w*22/100))),topH=b.h-ctrlH-8,top=topH>=30;
+ const ab=(css,txt,idx,extra)=>{const t=tspan(d,txt,idx,'position:absolute;text-align:center;'+css+(extra||''));return t};
+ const wide=`left:${6*S}px;width:${(b.w-12)*S}px;`;
+ let line=b.label||'';if(line)line+=' - '+status;else line=status;
+ const aIdx=topH>=44?3:4,hasA=top&&line.length;
+ if(hasA)ab(wide+`top:${4*S}px;opacity:.8`,line,aIdx);
+ if(top){const rt=4+(hasA?VLH[aIdx]+2:0),rb=topH;let bi=pickFont(cur,0,b.w-12,rb-rt);if(bi<0)bi=4;
+  ab(wide+`top:${((rt+rb)/2-VLH[bi]/2)*S}px;color:#FF8A3D`,cur,bi)}
+ const cw=b.w-2*cbw-16;let o1=top?'Set '+set:cur+' > '+set,ci=pickFont(o1,1,cw,ctrlH-2),ct=o1;
+ if(ci<0||ci>3){ct=set;ci=pickFont(set,1,cw,ctrlH-2);if(ci<0)ci=4}
+ ab(`left:${(cbw+8)*S}px;width:${cw*S}px;top:${(b.h-4-(ctrlH-18)/2-VLH[ci])*S}px`,ct,ci);
+ for(const dir of [-1,1]){const x=document.createElement('div');x.textContent=dir<0?'−':'+';
+  x.style.cssText=`position:absolute;${dir<0?'left':'right'}:${4*S}px;bottom:${4*S}px;width:${cbw*S}px;height:${ctrlH*S}px;background:#3A3F44;border-radius:${8*S}px;display:flex;align-items:center;justify-content:center;font-size:${(ctrlH>=30?18:14)*S}px;font-weight:700`;d.appendChild(x)}
+}
 function draw(){
  $('tabs').innerHTML='';
  L.pages.forEach((p,i)=>{const t=document.createElement('button');t.className='tab'+(i==pi?' on':'');t.textContent=p.name;t.onclick=()=>{pi=i;sel=null;draw()};$('tabs').appendChild(t)});
@@ -178,7 +240,7 @@ function draw(){
     fill.style.cssText+=`;left:calc(50% - ${TR/2*S}px);bottom:${14*S}px;width:${TR*S}px;height:${len/2}px`;
     knob.style.left=`calc(50% - ${KN/2*S}px)`;knob.style.bottom=(14*S+len/2-KN/2*S)+'px'}
    d.appendChild(bar);d.appendChild(fill);d.appendChild(knob);
-  }else{
+  }else if(b.type=='thermostat'){drawThermo(d,b)}else if(b.type=='value'){drawValue(d,b)}else{
    const ws=!!b.with_slider&&b.type!='camera';
    const sa=ws?slArea(b.h):0;d.style.padding='0 '+6*S+'px '+sa*S+'px';
    const ic=ICON_SVG[b.icon||(b.type=='camera'?'video':'')],txt=b.label||b.entity_id||'';
@@ -241,11 +303,12 @@ function mergeLinked(l){l.pages.forEach(p=>{const bs=p.buttons;
  p.buttons=bs.filter(x=>!x.merged_)})}
 function showProps(){
  const b=sel!=null?L.pages[pi].buttons[sel]:null;$('props').style.display=b?'block':'none';if(!b)return;
- const sl=b.type=='slider',cam=b.type=='camera';$('btnprops').style.display=sl?'none':'block';$('slprops').style.display=sl?'block':'none';
+ const sl=b.type=='slider',cam=b.type=='camera',th=b.type=='thermostat',val=b.type=='value';$('btnprops').style.display=(sl||th||val)?'none':'block';$('thprops').style.display=th?'block':'none';$('valprops').style.display=val?'block':'none';
+ for(const [id,key] of EXTRA)$(id).value=b[key]!==undefined?b[key]:'';if(val)$('bar').checked=!!b.bar;$('slprops').style.display=sl?'block':'none';
  $('camprops').style.display=cam?'block':'none';if(cam)$('fullbright').checked=!!b.full_brightness;$('actwrap').style.display=cam?'none':'block';$('slwrap').style.display=cam?'none':'block';
  for(const k of FIELDS)$(k).value=b[k]!==undefined?b[k]:(k=='color'?'#4A90E2':'');
  cellInfo(b);
- if(!sl&&!cam)updateSliderBox(b);
+ if(!sl&&!cam&&!th&&!val)updateSliderBox(b);
 }
 for(const k of FIELDS)$(k).oninput=()=>{
  const b=L.pages[pi].buttons[sel];
@@ -253,8 +316,15 @@ for(const k of FIELDS)$(k).oninput=()=>{
  const d=$('canvas').children[sel];
  if(k=='label'||k=='entity_id'){if(b.type!='slider'){draw();return}const l=d.querySelector('.lbl');if(l){l.textContent=(b.label?b.label+'  ':'')+'50%';l.classList.remove('ent')}}
  if(k=='icon'){draw();return}
- if(b.type!='slider'&&b.type!='camera'){if(k=='entity_id')updateSliderBox(b)}
+ if(b.type=='button'){if(k=='entity_id')updateSliderBox(b)}
  if(k=='color'){draw();return}};
+// Fields of the thermostat and value tiles: [input id, layout key]. Blank removes the key (the default applies).
+const EXTRA=[['step','step'],['tunit','unit'],['tmin','min'],['tmax','max'],['vattr','attr'],['subtitle','subtitle'],['sub_entity','sub_entity'],['sub_attr','sub_attr'],['vunit','unit'],['decimals','decimals'],['vmin','min'],['vmax','max']];
+for(const [id,key] of EXTRA)$(id).oninput=()=>{const b=L.pages[pi].buttons[sel];if(!b)return;const v=$(id).value;
+ if(v==='')delete b[key];else b[key]=$(id).type=='number'?+v:v;draw()};
+$('bar').onchange=()=>{const b=L.pages[pi].buttons[sel];if(!b)return;if($('bar').checked)b.bar=true;else delete b.bar;draw()};
+$('addth').onclick=()=>addW({type:'thermostat',label:'Thermostat',x:20,y:20,w:160,h:100,color:'#4A90E2'});
+$('addval').onclick=()=>addW({type:'value',label:'Title',x:20,y:20,w:140,h:80,color:'#4CAF50'});
 $('add').onclick=()=>addW({type:'button',label:'New',icon:'power',x:20,y:20,w:140,h:80,action:'toggle'});
 $('fullbright').onchange=()=>{const b=L.pages[pi].buttons[sel];if(!b)return;if($('fullbright').checked)b.full_brightness=true;else delete b.full_brightness};
 $('addcam').onclick=()=>addW({type:'camera',label:'Camera',icon:'video',x:20,y:20,w:140,h:80,color:'#8E6BBF'});

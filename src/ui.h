@@ -18,7 +18,7 @@ using SliderHandler = std::function<void(const String& entityId, const String& a
 void uiInit(ButtonHandler onPress, SliderHandler onSlide);
 // Rebuild all pages from layout JSON. Returns false (and keeps the old UI) if the JSON is invalid.
 bool uiBuild(const String& layoutJson);
-void uiSetState(const String& entityId, const String& state, const HaLevels& levels);
+void uiSetState(const String& entityId, const String& state, const HaLevels& levels, JsonObjectConst attrs);
 void uiSetStatus(const String& text);
 // Large message card over the home screen (first-run / Wi-Fi help). Empty text hides it.
 void uiSetBanner(const String& text);

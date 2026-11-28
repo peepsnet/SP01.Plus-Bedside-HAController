@@ -26,7 +26,18 @@ struct Widget {
   bool slider = false;
   bool camera = false;  // button that opens the full-screen camera view
   bool fullBright = false;  // camera: force full brightness while it is open
+  bool thermo = false;      // thermostat tile: current temperature, set point and - / + buttons
+  bool value = false;       // value tile: title, value (state or attribute), subtitle, optional level bar
   String entity, action, attr, label, url;
+  String subEntity, subAttr, subText, uText;  // value tile: subtitle source; thermostat/value: unit override
+  bool hasU = false;        // "unit" is set in the layout (may be empty) and replaces the one HA reports
+  int decimals = -1;        // value tile: digits after the point, -1 = automatic
+  float vmin = 0, vmax = 100, step = 0.5f, tmin = NAN, tmax = NAN;
+  int pw = 0, ph = 0, vIdx = 0, sIdx = 0, ctrlH = 0, cbw = 0, topH = 0;  // tile size and chosen font indexes
+  float target = NAN;       // thermostat: set point shown while taps are being collected
+  bool pending = false;
+  uint32_t lastTap = 0, holdUntil = 0;
+  lv_obj_t *lA = nullptr, *lB = nullptr, *lC = nullptr, *lBar = nullptr, *lVal = nullptr;
   float mul = 1;       // slider units per displayed unit (climate uses half degrees)
   const char* unit = "";
   lv_obj_t* obj = nullptr;
@@ -38,6 +49,8 @@ static std::map<String, std::vector<Widget*>> byEntity;
 struct EntityInfo {
   bool on = false;
   bool unavailable = false;
+  String state;                          // raw HA state text
+  std::map<String, String> attrs;        // short scalar attributes (value and thermostat tiles read these)
   HaLevels lv;
 };
 static std::map<String, EntityInfo> known;  // latest state per entity, so a rebuild restores it
@@ -367,7 +380,181 @@ static float levelFor(const Widget& w, const EntityInfo& e) {
   return NAN;
 }
 
+// ---- Value and thermostat tiles ---------------------------------------------------------------------------------------
+// Text sizes for these tiles, largest first (the same 24/18/16/14/12 px Montserrat sizes as buttons). The web preview uses the
+// same rules (valueFit / thermoFit in web_pages.h); keep them in step.
+static const lv_font_t* const VAL_FONT[5] = {&lv_font_montserrat_24, &lv_font_montserrat_18, &lv_font_montserrat_16, &lv_font_montserrat_14, &lv_font_montserrat_12};
+static const int VAL_LH[5] = {27, 21, 18, 16, 15};
+static const int VAL_PX[5] = {24, 18, 16, 14, 12};
+
+static bool parseNum(const String& s, float& v) {
+  char* end;
+  v = strtof(s.c_str(), &end);
+  return end != s.c_str() && *end == 0;
+}
+static String fmtNum(float v, int decimals) {
+  int d = decimals >= 0 ? decimals : (fabsf(v - roundf(v)) < 0.05f ? 0 : 1);
+  return String(v, d);
+}
+static String prettyText(String s) {  // "charging_complete" -> "Charging complete"
+  s.replace('_', ' ');
+  if (s.length()) s.setCharAt(0, toupper(s[0]));
+  return s;
+}
+static String joinUnit(const String& num, const String& unit) {
+  if (!unit.length()) return num;
+  const bool tight = unit == "%" || unit.startsWith("\xC2\xB0");
+  return num + (tight ? "" : " ") + unit;
+}
+// Reads an entity's state (attr empty) or one of its attributes. false when it is not known yet / unavailable.
+static bool readSource(const String& ent, const String& attr, String& raw, float& num, bool& isNum, String& unit) {
+  auto it = known.find(ent);
+  if (it == known.end()) return false;
+  const EntityInfo& e = it->second;
+  if (attr.length()) {
+    auto a = e.attrs.find(attr);
+    if (a == e.attrs.end()) return false;
+    raw = a->second;
+    unit = "";
+  } else {
+    if (e.state == "unavailable" || e.state == "unknown" || !e.state.length()) return false;
+    raw = e.state;
+    auto u = e.attrs.find("unit_of_measurement");
+    unit = u == e.attrs.end() ? String("") : u->second;
+  }
+  isNum = parseNum(raw, num);
+  return true;
+}
+static String shownText(const String& ent, const String& attr, int decimals, bool hasU, const String& uOver, float* numOut) {
+  String raw, unit;
+  float num = NAN;
+  bool isNum = false;
+  if (numOut) *numOut = NAN;
+  if (!readSource(ent, attr, raw, num, isNum, unit)) return "--";
+  if (!isNum) return prettyText(raw);
+  if (numOut) *numOut = num;
+  return joinUnit(fmtNum(num, decimals), hasU ? uOver : unit);
+}
+static int pickFont(const String& t, int from, int maxW, int maxH) {  // first size that fits, -1 if none
+  for (int i = from; i < 5; i++)
+    if (VAL_LH[i] <= maxH && lv_text_get_width(t.c_str(), t.length(), VAL_FONT[i], 0) <= maxW) return i;
+  return -1;
+}
+
+// Tile labels are one line: fixed width and height, cut with "..." when the text is too long.
+static void tileFont(lv_obj_t* l, int idx) {
+  lv_obj_set_style_text_font(l, VAL_FONT[idx], 0);
+  lv_obj_set_height(l, VAL_LH[idx]);
+}
+
+static void refreshValue(Widget& w) {
+  float num;
+  String vt = shownText(w.entity, w.attr, w.decimals, w.hasU, w.uText, &num);
+  int idx = w.vIdx;
+  while (idx < 4 && lv_text_get_width(vt.c_str(), vt.length(), VAL_FONT[idx], 0) > w.pw - 12) idx++;  // long values shrink
+  tileFont(w.lVal, idx);
+  lv_label_set_text(w.lVal, vt.c_str());
+  if (w.lC) {
+    String st = w.subText;
+    if (w.subEntity.length()) {
+      String sv = shownText(w.subEntity, w.subAttr, -1, false, "", nullptr);
+      if (!st.length()) st = sv;
+      else if (st.indexOf("{}") >= 0) st.replace("{}", sv);
+      else st += " " + sv;
+    }
+    lv_label_set_text(w.lC, st.c_str());
+  }
+  if (w.lBar) {
+    float f = isnan(num) || w.vmax <= w.vmin ? 0 : (num - w.vmin) / (w.vmax - w.vmin);
+    lv_bar_set_value(w.lBar, (int)lroundf(std::max(0.0f, std::min(1.0f, f)) * 1000), LV_ANIM_OFF);
+  }
+}
+
+static void refreshThermo(Widget& w) {
+  auto it = known.find(w.entity);
+  const bool ok = it != known.end() && it->second.state != "unavailable" && it->second.state != "unknown";
+  const String unit = w.hasU ? w.uText : String("\xC2\xB0");
+  String cur = "--", set = "--", status;
+  uint32_t accent = 0xFFFFFF;
+  float setV = NAN;
+  if (ok) {
+    const EntityInfo& e = it->second;
+    auto a = e.attrs.find("current_temperature");
+    float cv;
+    if (a != e.attrs.end() && parseNum(a->second, cv)) cur = joinUnit(fmtNum(cv, -1), unit);
+    setV = e.lv.temperature;
+    auto act = e.attrs.find("hvac_action");
+    String action = act == e.attrs.end() ? String("") : act->second;
+    if (e.state == "off") status = "Off";
+    else if (action.length()) status = prettyText(action);
+    else status = prettyText(e.state);
+    if (action == "heating") accent = 0xFF8A3D;
+    else if (action == "cooling") accent = 0x4FA8FF;
+  }
+  if (!isnan(w.target) && (w.pending || (int32_t)(w.holdUntil - millis()) > 0)) setV = w.target;
+  if (!isnan(setV)) set = joinUnit(fmtNum(setV, -1), unit);
+  const bool top = w.topH >= 30;
+  // top line: title and status
+  String line = w.label;
+  if (status.length() && ok) line += (line.length() ? " - " : "") + status;
+  const int aIdx = w.topH >= 44 ? 3 : 4;
+  const bool hasA = top && line.length();
+  if (hasA) { lv_label_set_text(w.lA, line.c_str()); lv_obj_remove_flag(w.lA, LV_OBJ_FLAG_HIDDEN); }
+  else lv_obj_add_flag(w.lA, LV_OBJ_FLAG_HIDDEN);
+  if (top) {
+    const int rt = 4 + (hasA ? VAL_LH[aIdx] + 2 : 0), rb = w.topH;
+    int bi = pickFont(cur, 0, w.pw - 12, rb - rt);
+    if (bi < 0) bi = 4;
+    tileFont(w.lB, bi);
+    lv_obj_set_style_text_color(w.lB, lv_color_hex(accent), 0);
+    lv_label_set_text(w.lB, cur.c_str());
+    lv_obj_align(w.lB, LV_ALIGN_TOP_MID, 0, (rt + rb) / 2 - VAL_LH[bi] / 2);
+    lv_obj_remove_flag(w.lB, LV_OBJ_FLAG_HIDDEN);
+  } else {
+    lv_obj_add_flag(w.lB, LV_OBJ_FLAG_HIDDEN);
+  }
+  // middle of the control row: "Set 22" (tall tile) or "21.5 > 22" (small tile), else just the set point
+  const int cw = w.pw - 2 * w.cbw - 16;
+  String o1 = top ? String("Set ") + set : cur + " > " + set;
+  int ci = pickFont(o1, 1, cw, w.ctrlH - 2);
+  String ct = o1;
+  if (ci < 0 || ci > 3) {
+    ct = set;
+    ci = pickFont(set, 1, cw, w.ctrlH - 2);
+    if (ci < 0) ci = 4;
+  }
+  tileFont(w.lC, ci);
+  lv_label_set_text(w.lC, ct.c_str());
+}
+
+static void thermoTap(lv_event_t* e) {
+  if (recentlySwiped()) return;
+  Widget* w = (Widget*)lv_event_get_user_data(e);
+  const int dir = (int)(intptr_t)lv_obj_get_user_data(lv_event_get_target_obj(e));
+  auto it = known.find(w->entity);
+  if (it == known.end()) return;
+  float base = isnan(w->target) || !(w->pending || (int32_t)(w->holdUntil - millis()) > 0) ? it->second.lv.temperature : w->target;
+  if (isnan(base)) return;
+  float step = w->step;
+  float lo = w->tmin, hi = w->tmax;
+  float v;
+  auto a = it->second.attrs.find("target_temp_step");
+  if (step <= 0 && a != it->second.attrs.end() && parseNum(a->second, v)) step = v;
+  if (step <= 0) step = 0.5f;
+  if (isnan(lo) && (a = it->second.attrs.find("min_temp")) != it->second.attrs.end() && parseNum(a->second, v)) lo = v;
+  if (isnan(hi) && (a = it->second.attrs.find("max_temp")) != it->second.attrs.end() && parseNum(a->second, v)) hi = v;
+  float t = roundf((base + dir * step) / step) * step;
+  if (!isnan(lo) && t < lo) t = lo;
+  if (!isnan(hi) && t > hi) t = hi;
+  w->target = t;
+  w->pending = true;
+  w->lastTap = millis();
+  refreshThermo(*w);
+}
+
 static void refreshWidget(Widget& w, const EntityInfo& e) {
+  if (w.thermo) { refreshThermo(w); return; }
+  if (w.value) { refreshValue(w); return; }
   if (e.unavailable) lv_obj_add_state(w.obj, LV_STATE_DISABLED);
   else lv_obj_remove_state(w.obj, LV_STATE_DISABLED);
   if (!w.slider) {
@@ -537,6 +724,118 @@ static void buildInlineSlider(Widget& sw, lv_obj_t* btn, JsonObject b, int bw, i
   wireSlider(sw, sl);
 }
 
+// Value tile: title (label), value, subtitle and an optional level bar. Height decides the sizes: the value keeps the largest
+// font that fits together with the title and subtitle (14 px, else 12 px); if nothing fits the subtitle, then the title, is dropped.
+static void fitValue(int area, bool& hasTitle, bool& hasSub, int& vi, int& si) {
+  const bool combos[3][2] = {{hasTitle, hasSub}, {hasTitle, false}, {false, false}};
+  for (auto& cb : combos) {
+    for (int v = 0; v < 5; v++)
+      for (int sz = 3; sz <= 4; sz++) {
+        if (VAL_PX[v] < VAL_PX[sz]) continue;
+        if (VAL_LH[v] + (cb[0] ? VAL_LH[sz] : 0) + (cb[1] ? VAL_LH[sz] : 0) <= area) {
+          hasTitle = cb[0]; hasSub = cb[1]; vi = v; si = sz;
+          return;
+        }
+      }
+  }
+  hasTitle = hasSub = false;
+  vi = si = 4;
+}
+
+static lv_obj_t* tileLabel(lv_obj_t* parent, int w, int fontIdx) {
+  lv_obj_t* l = lv_label_create(parent);
+  lv_obj_set_width(l, w);
+  lv_label_set_long_mode(l, LV_LABEL_LONG_DOT);
+  lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
+  tileFont(l, fontIdx);
+  return l;
+}
+
+static void buildValue(Widget& w, lv_obj_t* page, lv_color_t c, JsonObject b, int x, int y, int bw, int bh) {
+  lv_obj_t* card = lv_obj_create(page);
+  w.obj = card;
+  w.pw = bw;
+  w.ph = bh;
+  lv_obj_remove_style_all(card);
+  lv_obj_set_pos(card, x, y);
+  lv_obj_set_size(card, bw, bh);
+  lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
+  lv_obj_set_style_bg_color(card, lv_color_darken(c, 180), 0);
+  lv_obj_set_style_radius(card, 12, 0);
+  lv_obj_remove_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+  const bool bar = b["bar"] | false;
+  const int barH = bh >= 60 ? 8 : 6, reserve = bar ? barH + 14 : 0;
+  bool hasTitle = w.label.length(), hasSub = w.subText.length() || w.subEntity.length();
+  fitValue(bh - reserve - 6, hasTitle, hasSub, w.vIdx, w.sIdx);
+  lv_obj_set_style_pad_hor(card, 6, 0);
+  lv_obj_set_style_pad_bottom(card, reserve, 0);
+  lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
+  lv_obj_set_flex_align(card, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+  if (hasTitle) {
+    w.lA = tileLabel(card, bw - 12, w.sIdx);
+    lv_obj_set_style_text_opa(w.lA, LV_OPA_80, 0);
+    lv_label_set_text(w.lA, w.label.c_str());
+  }
+  w.lVal = tileLabel(card, bw - 12, w.vIdx);
+  if (hasSub) {
+    w.lC = tileLabel(card, bw - 12, w.sIdx);
+    lv_obj_set_style_text_opa(w.lC, LV_OPA_80, 0);
+  }
+  if (bar) {
+    w.lBar = lv_bar_create(card);
+    lv_obj_add_flag(w.lBar, LV_OBJ_FLAG_IGNORE_LAYOUT);
+    lv_obj_set_size(w.lBar, bw - 16, barH);
+    lv_obj_align(w.lBar, LV_ALIGN_BOTTOM_MID, 0, reserve - 6);  // aligned to the padded area: push it down to 6 px above the edge
+    lv_bar_set_range(w.lBar, 0, 1000);
+    lv_obj_set_style_radius(w.lBar, LV_RADIUS_CIRCLE, LV_PART_MAIN);
+    lv_obj_set_style_radius(w.lBar, LV_RADIUS_CIRCLE, LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(w.lBar, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(w.lBar, LV_OPA_30, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(w.lBar, c, LV_PART_INDICATOR);
+    lv_obj_set_style_bg_opa(w.lBar, LV_OPA_COVER, LV_PART_INDICATOR);
+  }
+  lv_label_set_text(w.lVal, "--");
+}
+
+// Thermostat tile: dark card with title and status on top, the current temperature, and a row [ - ] Set 22 [ + ].
+static void buildThermostat(Widget& w, lv_obj_t* page, lv_color_t c, JsonObject b, int x, int y, int bw, int bh) {
+  lv_obj_t* card = lv_obj_create(page);
+  w.obj = card;
+  w.pw = bw;
+  w.ph = bh;
+  lv_obj_remove_style_all(card);
+  lv_obj_set_pos(card, x, y);
+  lv_obj_set_size(card, bw, bh);
+  lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
+  lv_obj_set_style_bg_color(card, lv_color_hex(0x23272B), 0);
+  lv_obj_set_style_radius(card, 12, 0);
+  lv_obj_remove_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+  w.ctrlH = std::max(24, std::min(40, bh * 36 / 100));
+  w.cbw = std::max(28, std::min(48, bw * 22 / 100));
+  w.topH = bh - w.ctrlH - 8;
+  w.lA = tileLabel(card, bw - 12, w.topH >= 44 ? 3 : 4);
+  lv_obj_align(w.lA, LV_ALIGN_TOP_MID, 0, 4);
+  lv_obj_set_style_text_opa(w.lA, LV_OPA_80, 0);
+  w.lB = tileLabel(card, bw - 12, 0);
+  for (int dir = -1; dir <= 1; dir += 2) {
+    lv_obj_t* bt = lv_button_create(card);
+    lv_obj_set_size(bt, w.cbw, w.ctrlH);
+    lv_obj_align(bt, dir < 0 ? LV_ALIGN_BOTTOM_LEFT : LV_ALIGN_BOTTOM_RIGHT, dir < 0 ? 4 : -4, -4);
+    lv_obj_set_style_radius(bt, 8, 0);
+    lv_obj_set_style_pad_all(bt, 0, 0);
+    lv_obj_set_style_bg_color(bt, lv_color_hex(0x3A3F44), 0);
+    lv_obj_set_style_bg_color(bt, c, LV_STATE_PRESSED);
+    lv_obj_set_user_data(bt, (void*)(intptr_t)dir);
+    lv_obj_add_event_cb(bt, thermoTap, LV_EVENT_CLICKED, &w);
+    lv_obj_t* l = lv_label_create(bt);
+    lv_obj_set_style_text_font(l, w.ctrlH >= 30 ? &lv_font_montserrat_18 : &lv_font_montserrat_14, 0);
+    lv_label_set_text(l, dir < 0 ? LV_SYMBOL_MINUS : LV_SYMBOL_PLUS);
+    lv_obj_center(l);
+  }
+  w.lC = tileLabel(card, bw - 2 * w.cbw - 16, 2);
+  lv_obj_align(w.lC, LV_ALIGN_BOTTOM_MID, 0, -4 - (w.ctrlH - 18) / 2);
+}
+
 static void buildSlider(Widget& w, lv_obj_t* page, lv_color_t c, JsonObject b, int x, int y, int bw, int bh) {
   w.attr = String(b["attr"] | "");
   int mn, mx;
@@ -641,6 +940,22 @@ bool uiBuild(const String& layoutJson) {
       String type = b["type"] | "button";
       w->slider = type == "slider";
       w->camera = type == "camera";
+      w->thermo = type == "thermostat";
+      w->value = type == "value";
+      w->attr = String(b["attr"] | "");
+      w->subEntity = String(b["sub_entity"] | "");
+      w->subAttr = String(b["sub_attr"] | "");
+      w->subText = String(b["subtitle"] | "");
+      w->hasU = b["unit"].is<const char*>();
+      w->uText = String(b["unit"] | "");
+      w->decimals = b["decimals"] | -1;
+      w->vmin = b["min"] | 0.0f;
+      w->vmax = b["max"] | 100.0f;
+      w->step = b["step"] | 0.0f;
+      if (w->thermo) {
+        if (b["min"].is<float>()) w->tmin = b["min"].as<float>();
+        if (b["max"].is<float>()) w->tmax = b["max"].as<float>();
+      }
       w->url = String(b["url"] | "");
       w->fullBright = b["full_brightness"] | false;
       const char* hex = b["color"] | "#4A90E2";
@@ -649,6 +964,8 @@ bool uiBuild(const String& layoutJson) {
       const bool ws = !w->slider && !w->camera && (b["with_slider"] | false) && w->entity.length() && bh >= 40 && bw >= 40;
 
       if (w->slider) buildSlider(*w, page, c, b, bx, by, bw, bh);
+      else if (w->thermo) buildThermostat(*w, page, c, b, bx, by, bw, bh);
+      else if (w->value) buildValue(*w, page, c, b, bx, by, bw, bh);
       else buildButton(*w, page, c, b, bx, by, bw, bh, ws);
 
       if (w->entity.length() && !w->camera) {  // a camera tile opens a stream, it has no state to follow
@@ -657,6 +974,15 @@ bool uiBuild(const String& layoutJson) {
         byEntity[w->entity].push_back(w.get());
         auto it = known.find(w->entity);
         if (it != known.end()) refreshWidget(*w, it->second);
+      }
+      if (w->value && w->subEntity.length()) {  // the subtitle follows a second entity
+        if (std::find(entityList.begin(), entityList.end(), w->subEntity) == entityList.end())
+          entityList.push_back(w->subEntity);
+        byEntity[w->subEntity].push_back(w.get());
+      }
+      if (w->thermo || w->value) {
+        static const EntityInfo none;
+        refreshWidget(*w, none);  // fills in the current values (or "--" until Home Assistant has reported)
       }
       if (ws) {  // the slider built into the button follows the same entity
         auto sw = std::unique_ptr<Widget>(new Widget());
@@ -675,13 +1001,22 @@ bool uiBuild(const String& layoutJson) {
   return true;
 }
 
-void uiSetState(const String& entityId, const String& state, const HaLevels& lv) {
+void uiSetState(const String& entityId, const String& state, const HaLevels& lv, JsonObjectConst attrs) {
   static const char* ON_STATES[] = {"on", "open", "opening", "playing", "unlocked", "home", "heat", "cool",
                                     "heat_cool", "auto", "dry", "fan_only"};
   EntityInfo& e = known[entityId];
   e.on = false;
   for (auto* o : ON_STATES) if (state == o) e.on = true;
   e.unavailable = (state == "unavailable");
+  e.state = state;
+  // Keep short scalar attributes (value and thermostat tiles read them); an update may carry only the changed ones.
+  for (JsonPairConst kv : attrs) {
+    if (e.attrs.size() >= 24 && e.attrs.find(kv.key().c_str()) == e.attrs.end()) continue;
+    JsonVariantConst v = kv.value();
+    if (v.is<JsonObjectConst>() || v.is<JsonArrayConst>()) continue;
+    String t = v.is<const char*>() ? String(v.as<const char*>()) : (v.isNull() ? String("") : String(v.as<String>()));
+    if (t.length() <= 48) e.attrs[kv.key().c_str()] = t;
+  }
   // Merge: updates may carry only the attributes that changed.
   auto merge = [](float& dst, float src) { if (!std::isnan(src)) dst = src; };
   merge(e.lv.brightness, lv.brightness);
@@ -738,6 +1073,12 @@ void uiTick() {
   else if (sw == SW_NEXT && curPage + 1 < pages.size()) showPage(curPage + 1);
   else if (sw == SW_PREV && curPage > 0) showPage(curPage - 1);
   cameraTick();
+  for (auto& w : widgets)  // thermostat taps are collected, then sent as one set_temperature call
+    if (w->thermo && w->pending && millis() - w->lastTap > 700) {
+      w->pending = false;
+      w->holdUntil = millis() + 2500;
+      if (slideHandler) slideHandler(w->entity, "", w->target);
+    }
   lv_timer_handler();
 }
 

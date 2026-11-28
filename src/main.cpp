@@ -101,7 +101,7 @@ void setup() {
   improvBegin();
   webBegin(applyLayout);
   if (!apMode) {
-    haBegin([](const String& e, const String& s, const HaLevels& lv) { uiSetState(e, s, lv); },
+    haBegin([](const String& e, const String& s, const HaLevels& lv, JsonObjectConst a) { uiSetState(e, s, lv, a); },
             [](const String& st) { Serial.println(st); uiSetStatus(st); });
     haSetEntities(uiEntities());
   }
